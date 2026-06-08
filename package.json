@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "vite build && cross-env CSC_LINK=cert.pfx CSC_KEY_PASSWORD=migrainelog123 electron-builder",
+    "electron:build": "vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder",
     "make": "npm run electron:build"
   },
   "dependencies": {
@@ -31,14 +31,7 @@
       "output": "out"
     },
     "win": {
-      "target": "nsis",
-      "icon": "icon.png"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "target": "portable"
     },
     "files": [
       "dist/**/*",
