@@ -28,11 +28,13 @@ jobs:
         id: ver
         shell: pwsh
         run: |
-          # Base semver lue dans package.json (ex: 1.1.0), métadonnée = horodatage
+          # Base semver lue dans package.json (ex: 1.1.0)
+          # Métadonnée = numéro d'itération auto-incrémenté + horodatage
           $base    = (Get-Content package.json -Raw | ConvertFrom-Json).version -replace '\+.*$',''
+          $run     = "${{ github.run_number }}"
           $stamp   = Get-Date -Format 'yyyy.MM.dd.HHmm'
-          $version = "$base+$stamp"     # ex: 1.1.0+2026.06.08.2055  (nom de l'exe)
-          $tag     = "v$base-$stamp"    # ex: v1.1.0-2026.06.08.2055 (tag git, sûr en URL)
+          $version = "$base+build.$run.$stamp"  # ex: 1.1.0+build.7.2026.06.08.2055 (nom de l'exe)
+          $tag     = "v$base-build$run"         # ex: v1.1.0-build7 (tag git, sûr en URL)
           "VERSION=$version" >> $env:GITHUB_OUTPUT
           "TAG=$tag"         >> $env:GITHUB_OUTPUT
           Write-Host "version=$version  tag=$tag"
