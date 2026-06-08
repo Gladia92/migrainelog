@@ -583,15 +583,47 @@ export default function App() {
       {/* AI */}
       {view==="ai"&&(
         <div>
-          <div style={{background:"var(--color-background-secondary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem",marginBottom:16}}>
-            <p style={{fontWeight:500,marginBottom:4}}>Analyse médicale par Claude</p>
-            <p style={{color:"var(--color-text-secondary)",fontSize:12,marginBottom:12,lineHeight:1.6}}>
-              Analyse du mois en cours. Si moins de 3 épisodes, l'historique complet est utilisé. Destiné à être relu par votre médecin.
-            </p>
-            <button onClick={launchAI} disabled={aiLoading} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 16px"}}>
-              {aiLoading?<><i className="ti ti-loader-2" style={{fontSize:16}} aria-hidden="true"></i> Analyse en cours…</>:<><i className="ti ti-brain" style={{fontSize:16}} aria-hidden="true"></i> Lancer l'analyse</>}
-            </button>
-          </div>
+          {/* Bloc setup Ollama si pas prêt */}
+          {isElectron && !ollamaReady && (
+            <div style={{background:"var(--color-background-secondary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem",marginBottom:16}}>
+              <p style={{fontWeight:500,marginBottom:4}}>Moteur IA local non installé</p>
+              <p style={{color:"var(--color-text-secondary)",fontSize:12,marginBottom:12,lineHeight:1.6}}>
+                L'analyse médicale utilise un modèle IA médical qui s'exécute entièrement sur votre machine. Aucune donnée ne quitte votre ordinateur.<br/>
+                <strong>Première installation : ~4 Go à télécharger.</strong> Cette opération est unique.
+              </p>
+              {ollamaSetupRunning ? (
+                <div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,fontSize:13}}>
+                    <i className="ti ti-loader-2" style={{fontSize:16}} aria-hidden="true"></i>
+                    {stepLabel[ollamaProgress.step] || "Initialisation…"}
+                  </div>
+                  {ollamaProgress.progress > 0 && (
+                    <div style={{background:"var(--color-border-tertiary)",borderRadius:4,height:6,width:"100%"}}>
+                      <div style={{background:"var(--color-text-info)",borderRadius:4,height:6,width:`${ollamaProgress.progress}%`,transition:"width 0.3s"}}/>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <button onClick={handleOllamaSetup} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 16px"}}>
+                  <i className="ti ti-download" style={{fontSize:16}} aria-hidden="true"></i> Installer le moteur IA
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Bloc analyse */}
+          {(!isElectron || ollamaReady) && (
+            <div style={{background:"var(--color-background-secondary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem",marginBottom:16}}>
+              <p style={{fontWeight:500,marginBottom:4}}>Analyse médicale {isElectron ? "(IA locale)" : "(Claude)"}</p>
+              <p style={{color:"var(--color-text-secondary)",fontSize:12,marginBottom:12,lineHeight:1.6}}>
+                Analyse du mois en cours. Si moins de 3 épisodes, l'historique complet est utilisé. Destiné à être relu par votre médecin.
+              </p>
+              <button onClick={launchAI} disabled={aiLoading} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 16px"}}>
+                {aiLoading?<><i className="ti ti-loader-2" style={{fontSize:16}} aria-hidden="true"></i> Analyse en cours…</>:<><i className="ti ti-brain" style={{fontSize:16}} aria-hidden="true"></i> Lancer l'analyse</>}
+              </button>
+            </div>
+          )}
+
           {aiError&&<div style={{background:"var(--color-background-danger)",border:"0.5px solid var(--color-border-danger)",borderRadius:"var(--border-radius-md)",padding:"12px 16px",color:"var(--color-text-danger)",fontSize:13,marginBottom:12}}>{aiError}</div>}
           {aiResult&&(
             <div style={{background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem"}}>
