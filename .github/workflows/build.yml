@@ -3,6 +3,8 @@ name: Build MigraineLog
 on:
   push:
     branches: [ main ]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 env:
