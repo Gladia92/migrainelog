@@ -1,8 +1,7 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, net } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const https = require("https");
-const { execFile, spawn } = require("child_process");
+const { spawn } = require("child_process");
 const os = require("os");
 
 // ── Ollama
@@ -16,18 +15,29 @@ function ensureOllamaDir() {
   if (!fs.existsSync(OLLAMA_DIR)) fs.mkdirSync(OLLAMA_DIR, { recursive: true });
 }
 
+// ── Téléchargement via electron net (contourne les restrictions CSP)
 function downloadFile(url, dest, onProgress) {
   return new Promise((resolve, reject) => {
     const follow = (u) => {
-      https.get(u, (res) => {
-        if (res.statusCode === 301 || res.statusCode === 302) { follow(res.headers.location); return; }
-        const total = parseInt(res.headers["content-length"] || "0");
+      const request = net.request(u);
+      request.on("response", (response) => {
+        if (response.statusCode === 301 || response.statusCode === 302) {
+          follow(response.headers.location);
+          return;
+        }
+        const total = parseInt(response.headers["content-length"] || "0");
         let received = 0;
         const file = fs.createWriteStream(dest);
-        res.on("data", chunk => { received += chunk.length; file.write(chunk); if (total) onProgress(Math.round(received / total * 100)); });
-        res.on("end", () => { file.end(); resolve(); });
-        res.on("error", reject);
-      }).on("error", reject);
+        response.on("data", (chunk) => {
+          received += chunk.length;
+          file.write(chunk);
+          if (total) onProgress(Math.round(received / total * 100));
+        });
+        response.on("end", () => { file.end(); resolve(); });
+        response.on("error", (err) => { file.destroy(); reject(err); });
+      });
+      request.on("error", reject);
+      request.end();
     };
     follow(url);
   });
@@ -56,7 +66,6 @@ app.on("before-quit", () => { if (ollamaProcess) ollamaProcess.kill(); });
 const isDev = !app.isPackaged;
 const DATA_DIR = path.join(os.homedir(), "Documents", "MigraineLog");
 
-// Crée le dossier de données si inexistant
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 function createWindow() {
@@ -73,7 +82,6 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-
   if (isDev) {
     win.loadURL("http://localhost:5173");
   } else {
@@ -92,10 +100,9 @@ ipcMain.handle("read-data", (_e, filename) => {
   return fs.readFileSync(fp, "utf8");
 });
 
-// ── IPC : écrire un fichier de données (auto-save)
+// ── IPC : écrire un fichier de données
 ipcMain.handle("write-data", (_e, filename, content) => {
-  const fp = path.join(DATA_DIR, filename);
-  fs.writeFileSync(fp, content, "utf8");
+  fs.writeFileSync(path.join(DATA_DIR, filename), content, "utf8");
   return true;
 });
 
@@ -119,12 +126,12 @@ ipcMain.handle("choose-data-dir", async (e) => {
   return result.filePaths[0];
 });
 
-// ── IPC : exporter tout en JSON vers un fichier choisi
+// ── IPC : exporter tout en JSON
 ipcMain.handle("export-json", async (e, content) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   const result = await dialog.showSaveDialog(win, {
     title: "Exporter les données MigraineLog",
-    defaultPath: path.join(require("os").homedir(), "Downloads", `migrainelog_export_${Date.now()}.json`),
+    defaultPath: path.join(os.homedir(), "Downloads", `migrainelog_export_${Date.now()}.json`),
     filters: [{ name: "JSON", extensions: ["json"] }],
   });
   if (result.canceled) return false;
@@ -132,69 +139,7 @@ ipcMain.handle("export-json", async (e, content) => {
   return true;
 });
 
-// ── IPC : statut et setup Ollama
-ipcMain.handle("ollama-status", async () => {
-  const binExists  = fs.existsSync(OLLAMA_BIN);
-  const modelPath  = path.join(OLLAMA_DIR, "models", "manifests", "registry.ollama.ai", "library", MODEL_NAME);
-  const modelExists = fs.existsSync(modelPath);
-  const running    = await ollamaRunning();
-  return { binExists, modelExists, running };
-});
-
-ipcMain.handle("ollama-setup", async (e) => {
-  const win = BrowserWindow.fromWebContents(e.sender);
-  const send = (step, progress) => win.webContents.send("ollama-progress", { step, progress });
-
-  ensureOllamaDir();
-
-  // 1. Télécharger Ollama si absent
-  if (!fs.existsSync(OLLAMA_BIN)) {
-    send("download-ollama", 0);
-    await downloadFile(OLLAMA_URL, OLLAMA_BIN, p => send("download-ollama", p));
-    fs.chmodSync(OLLAMA_BIN, 0o755);
-  }
-
-  // 2. Démarrer Ollama
-  if (!(await ollamaRunning())) {
-    send("starting", 0);
-    await startOllama();
-  }
-
-  // 3. Télécharger le modèle si absent
-  const modelPath = path.join(OLLAMA_DIR, "models", "manifests", "registry.ollama.ai", "library", MODEL_NAME);
-  if (!fs.existsSync(modelPath)) {
-    send("download-model", 0);
-    await new Promise((resolve, reject) => {
-      const pull = spawn(OLLAMA_BIN, ["pull", MODEL_NAME], {
-        env: { ...process.env, OLLAMA_MODELS: OLLAMA_DIR }
-      });
-      pull.stdout.on("data", d => {
-        const m = d.toString().match(/(\d+)%/);
-        if (m) send("download-model", parseInt(m[1]));
-      });
-      pull.on("close", resolve);
-      pull.on("error", reject);
-    });
-  }
-
-  send("ready", 100);
-  return true;
-});
-
-ipcMain.handle("ollama-start", async () => {
-  if (!(await ollamaRunning())) await startOllama();
-  return true;
-});
-
-ipcMain.handle("ollama-analyze", async (_e, prompt) => {
-  const resp = await fetch("http://127.0.0.1:11434/api/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: MODEL_NAME, prompt, stream: false })
-  });
-  const json = await resp.json();
-  return json.response || "";
-});
+// ── IPC : importer depuis un fichier JSON
 ipcMain.handle("import-json", async (e) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   const result = await dialog.showOpenDialog(win, {
@@ -204,4 +149,74 @@ ipcMain.handle("import-json", async (e) => {
   });
   if (result.canceled) return null;
   return fs.readFileSync(result.filePaths[0], "utf8");
+});
+
+// ── IPC : statut Ollama
+ipcMain.handle("ollama-status", async () => {
+  const binExists   = fs.existsSync(OLLAMA_BIN);
+  const modelPath   = path.join(OLLAMA_DIR, "models", "manifests", "registry.ollama.ai", "library", MODEL_NAME);
+  const modelExists = fs.existsSync(modelPath);
+  const running     = await ollamaRunning();
+  return { binExists, modelExists, running };
+});
+
+// ── IPC : setup Ollama (téléchargement moteur + modèle)
+ipcMain.handle("ollama-setup", async (e) => {
+  const win  = BrowserWindow.fromWebContents(e.sender);
+  const send = (step, progress) => win.webContents.send("ollama-progress", { step, progress });
+
+  try {
+    ensureOllamaDir();
+
+    if (!fs.existsSync(OLLAMA_BIN)) {
+      send("download-ollama", 0);
+      await downloadFile(OLLAMA_URL, OLLAMA_BIN, p => send("download-ollama", p));
+      fs.chmodSync(OLLAMA_BIN, 0o755);
+    }
+
+    if (!(await ollamaRunning())) {
+      send("starting", 0);
+      await startOllama();
+    }
+
+    const modelPath = path.join(OLLAMA_DIR, "models", "manifests", "registry.ollama.ai", "library", MODEL_NAME);
+    if (!fs.existsSync(modelPath)) {
+      send("download-model", 0);
+      await new Promise((resolve, reject) => {
+        const pull = spawn(OLLAMA_BIN, ["pull", MODEL_NAME], {
+          env: { ...process.env, OLLAMA_MODELS: OLLAMA_DIR }
+        });
+        pull.stdout.on("data", d => {
+          const m = d.toString().match(/(\d+)%/);
+          if (m) send("download-model", parseInt(m[1]));
+        });
+        pull.stderr.on("data", d => console.error("ollama pull:", d.toString()));
+        pull.on("close", resolve);
+        pull.on("error", reject);
+      });
+    }
+
+    send("ready", 100);
+    return true;
+  } catch (err) {
+    console.error("ollama-setup error:", err);
+    throw err;
+  }
+});
+
+// ── IPC : démarrer Ollama
+ipcMain.handle("ollama-start", async () => {
+  if (!(await ollamaRunning())) await startOllama();
+  return true;
+});
+
+// ── IPC : analyser avec Ollama
+ipcMain.handle("ollama-analyze", async (_e, prompt) => {
+  const resp = await fetch("http://127.0.0.1:11434/api/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: MODEL_NAME, prompt, stream: false })
+  });
+  const json = await resp.json();
+  return json.response || "";
 });
