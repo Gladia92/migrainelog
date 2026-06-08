@@ -141,3 +141,9 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Clé privée de signature — NE JAMAIS committer (le .cer public, lui, est suivi)
+cert.pfx
+*.pfx
+cert-base64.txt
+*base64*
