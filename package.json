@@ -1,0 +1,48 @@
+{
+  "name": "migrainelog",
+  "version": "1.0.0",
+  "description": "Journal de migraines numérique",
+  "main": "electron.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false CSC_LINK= WIN_CSC_LINK= electron-builder",
+    "make": "npm run electron:build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "concurrently": "^8.2.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.6.0",
+    "vite": "^5.0.0",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.migrainelog.app",
+    "productName": "MigraineLog",
+    "directories": {
+      "output": "out"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "files": [
+      "dist/**/*",
+      "electron.js",
+      "preload.js"
+    ]
+  }
+}
