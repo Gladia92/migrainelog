@@ -26,6 +26,16 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v', ''
+          $pkg = Get-Content package.json | ConvertFrom-Json
+          $pkg.version = $tag
+          $pkg | ConvertTo-Json -Depth 10 | Set-Content package.json
+          Write-Host "Version set to $tag"
+        shell: pwsh
+
       - name: Build
         run: npm run make
         env:
