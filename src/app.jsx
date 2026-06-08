@@ -317,7 +317,7 @@ export default function App() {
       await window.electronAPI.ollamaSetup();
       const s = await window.electronAPI.ollamaStatus();
       setOllamaStatus(s);
-    } catch { setAiError("Erreur lors de l'installation du moteur IA."); }
+    } catch (e) { setAiError("Erreur lors de l'installation du moteur IA : " + (e?.message || e)); }
     setOllamaSetupRunning(false);
   };
 

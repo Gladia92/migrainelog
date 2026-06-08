@@ -185,6 +185,8 @@ ipcMain.handle("ollama-setup", async (e) => {
     if (!fs.existsSync(OLLAMA_BIN)) {
       send("download-ollama", 0);
       await downloadFile(OLLAMA_URL, OLLAMA_ZIP, p => send("download-ollama", p));
+      const zsize = fs.existsSync(OLLAMA_ZIP) ? fs.statSync(OLLAMA_ZIP).size : 0;
+      if (zsize < 1000000) throw new Error(`Téléchargement du moteur incomplet (${zsize} octets) — URL ou réseau ?`);
       send("extract-ollama", 0);
       await extractZip(OLLAMA_ZIP, OLLAMA_DIR);
       try { fs.unlinkSync(OLLAMA_ZIP); } catch {}
