@@ -301,20 +301,55 @@ export default function App() {
   const synthese = computeSynthese(episodes, settings.meds);
   const allRows  = [...ROWS, ...settings.meds.map((m,i) => ({ key:`med_${i}`, label:m, type:"medcheck", idx:i }))];
 
+  const [ollamaStatus, setOllamaStatus] = useState({ binExists: false, modelExists: false, running: false });
+  const [ollamaSetupRunning, setOllamaSetupRunning] = useState(false);
+  const [ollamaProgress, setOllamaProgress] = useState({ step: "", progress: 0 });
+
+  useEffect(() => {
+    if (!isElectron) return;
+    window.electronAPI.ollamaStatus().then(setOllamaStatus);
+    window.electronAPI.onOllamaProgress(p => setOllamaProgress(p));
+  }, []);
+
+  const handleOllamaSetup = async () => {
+    setOllamaSetupRunning(true);
+    try {
+      await window.electronAPI.ollamaSetup();
+      const s = await window.electronAPI.ollamaStatus();
+      setOllamaStatus(s);
+    } catch { setAiError("Erreur lors de l'installation du moteur IA."); }
+    setOllamaSetupRunning(false);
+  };
+
+  const ollamaReady = ollamaStatus.binExists && ollamaStatus.modelExists;
+
+  const stepLabel = {
+    "download-ollama": "Téléchargement du moteur IA…",
+    "starting":        "Démarrage du moteur IA…",
+    "download-model":  "Téléchargement du modèle médical (≈4 Go)…",
+    "ready":           "Prêt",
+  };
+
   const launchAI = async () => {
     setAiLoading(true); setAiResult(""); setAiError("");
     try {
+      if (!ollamaStatus.running) await window.electronAPI.ollamaStart();
       const allData = await getAllMonthsData(settings.meds);
       const prompt = buildPrompt(episodes, allData, settings, year, month);
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1000, messages:[{role:"user",content:prompt}] })
-      });
-      const json = await resp.json();
-      const text = json.content?.map(b=>b.text||"").join("")||"";
+      let text = "";
+      if (isElectron) {
+        text = await window.electronAPI.ollamaAnalyze(prompt);
+      } else {
+        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1000, messages:[{role:"user",content:prompt}] })
+        });
+        const json = await resp.json();
+        text = json.content?.map(b=>b.text||"").join("")||"";
+      }
       if (!text) throw new Error();
       setAiResult(text);
-    } catch { setAiError("Erreur lors de l'analyse. Vérifiez votre connexion."); }
+    } catch { setAiError("Erreur lors de l'analyse."); }
     setAiLoading(false);
   };
 
