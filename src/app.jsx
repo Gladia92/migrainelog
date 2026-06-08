@@ -325,6 +325,7 @@ export default function App() {
 
   const stepLabel = {
     "download-ollama": "Téléchargement du moteur IA…",
+    "extract-ollama":  "Extraction du moteur IA…",
     "starting":        "Démarrage du moteur IA…",
     "download-model":  "Téléchargement du modèle médical (≈4 Go)…",
     "ready":           "Prêt",

@@ -7,7 +7,10 @@ const os = require("os");
 // ── Ollama
 const OLLAMA_DIR  = path.join(app.getPath("userData"), "ollama");
 const OLLAMA_BIN  = path.join(OLLAMA_DIR, "ollama.exe");
-const OLLAMA_URL  = "https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.exe";
+// Le binaire Windows autonome est distribué en .zip (pas en .exe) -> on télécharge le zip puis on extrait
+const OLLAMA_URL  = "https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip";
+const OLLAMA_ZIP  = path.join(OLLAMA_DIR, "ollama.zip");
+const OLLAMA_MODELS_DIR = path.join(OLLAMA_DIR, "models");
 const MODEL_NAME  = "meditron";
 let ollamaProcess = null;
 
@@ -43,10 +46,21 @@ function downloadFile(url, dest, onProgress) {
   });
 }
 
+// Extrait un .zip via le tar intégré de Windows (bsdtar, présent depuis Win10 1803)
+function extractZip(zipPath, destDir) {
+  return new Promise((resolve, reject) => {
+    const p = spawn("tar", ["-xf", zipPath, "-C", destDir]);
+    let err = "";
+    p.stderr.on("data", d => { err += d.toString(); });
+    p.on("close", code => code === 0 ? resolve() : reject(new Error("Extraction échouée: " + err)));
+    p.on("error", reject);
+  });
+}
+
 function startOllama() {
   return new Promise((resolve) => {
     ollamaProcess = spawn(OLLAMA_BIN, ["serve"], {
-      env: { ...process.env, OLLAMA_MODELS: OLLAMA_DIR },
+      env: { ...process.env, OLLAMA_MODELS: OLLAMA_MODELS_DIR },
       detached: false, stdio: "ignore"
     });
     setTimeout(resolve, 2000);
@@ -170,8 +184,11 @@ ipcMain.handle("ollama-setup", async (e) => {
 
     if (!fs.existsSync(OLLAMA_BIN)) {
       send("download-ollama", 0);
-      await downloadFile(OLLAMA_URL, OLLAMA_BIN, p => send("download-ollama", p));
-      fs.chmodSync(OLLAMA_BIN, 0o755);
+      await downloadFile(OLLAMA_URL, OLLAMA_ZIP, p => send("download-ollama", p));
+      send("extract-ollama", 0);
+      await extractZip(OLLAMA_ZIP, OLLAMA_DIR);
+      try { fs.unlinkSync(OLLAMA_ZIP); } catch {}
+      if (!fs.existsSync(OLLAMA_BIN)) throw new Error("ollama.exe introuvable après extraction");
     }
 
     if (!(await ollamaRunning())) {
@@ -184,13 +201,16 @@ ipcMain.handle("ollama-setup", async (e) => {
       send("download-model", 0);
       await new Promise((resolve, reject) => {
         const pull = spawn(OLLAMA_BIN, ["pull", MODEL_NAME], {
-          env: { ...process.env, OLLAMA_MODELS: OLLAMA_DIR }
+          env: { ...process.env, OLLAMA_MODELS: OLLAMA_MODELS_DIR }
         });
         pull.stdout.on("data", d => {
           const m = d.toString().match(/(\d+)%/);
           if (m) send("download-model", parseInt(m[1]));
         });
-        pull.stderr.on("data", d => console.error("ollama pull:", d.toString()));
+        pull.stderr.on("data", d => {
+          const m = d.toString().match(/(\d+)\s*%/);
+          if (m) send("download-model", parseInt(m[1]));
+        });
         pull.on("close", resolve);
         pull.on("error", reject);
       });
