@@ -126,8 +126,7 @@ function computeSynthese(episodes, meds) {
   };
 }
 
-function buildPrompt(episodes, allData, settings, year, month) {
-  const useHistory = episodes.length < 3;
+function buildPrompt(currentEpisodes, monthsData, settings, year, month) {
   const meds = settings.meds;
   const fmt = (e, y, m) => {
     const p = [`Jour ${e.day} (${MONTHS[m]} ${y})`];
@@ -151,35 +150,72 @@ function buildPrompt(episodes, allData, settings, year, month) {
     if (e.note) p.push(`note: "${e.note}"`);
     return p.join(" | ");
   };
-  let epTxt = "";
-  if (useHistory && allData.length) {
-    epTxt = allData.map(({year:y,month:m,data}) => buildEpisodes(data,meds).map(e => fmt(e,y,m)).join("\n")).filter(Boolean).join("\n");
-  } else {
-    epTxt = episodes.map(e => fmt(e, year, month)).join("\n");
-  }
-  const scope = useHistory
-    ? `l'historique complet (moins de 3 épisodes ce mois)`
-    : `le mois de ${MONTHS[month]} ${year}`;
-  return `Tu es un assistant médical spécialisé en céphalologie. Tu analyses un journal de migraines. Ton analyse sera relue par le médecin traitant. Rédige en français, de manière structurée et médicalement rigoureuse.
 
-Données : ${scope}
-Médicaments aigus (et schéma de prise) :
+  // Récap mensuel sur la fenêtre choisie (du plus ancien au plus récent)
+  const monthly = monthsData
+    .map(({ year: y, month: m, data }) => ({ y, m, syn: computeSynthese(buildEpisodes(data, meds), meds) }))
+    .filter(x => x.syn);
+  const recap = monthly.map(({ y, m, syn }) => {
+    const medsTxt = syn.medCounts.filter(mc => mc.count > 0)
+      .map(mc => `${mc.name} ${mc.days} j (${mc.count} prise(s)${mc.double ? `, dont ${mc.double} 2e prise` : ""})`).join(" ; ");
+    const tag = (y === year && m === month) ? " [mois courant]" : "";
+    return `- ${MONTHS[m]} ${y}${tag} : ${syn.count} épisode(s), intensité moy ${syn.avgInt}/10, durée moy ${syn.avgDur}h${medsTxt ? ` ; ${medsTxt}` : ""}`;
+  }).join("\n");
+
+  const detail = currentEpisodes.length
+    ? currentEpisodes.map(e => fmt(e, year, month)).join("\n")
+    : "Aucun épisode enregistré ce mois-ci.";
+
+  // Toutes les notes de la période (y compris les jours sans crise)
+  const notesTxt = monthsData.flatMap(({ year: y, month: m, data }) =>
+    Object.entries(data)
+      .filter(([k, v]) => k.startsWith("d") && v && v.note)
+      .map(([k, v]) => ({ y, m, day: parseInt(k.slice(1)), note: v.note })))
+    .sort((a, b) => (a.y * 12 + a.m) - (b.y * 12 + b.m) || a.day - b.day)
+    .map(n => `- ${n.day} ${MONTHS[n.m]} ${n.y} : "${n.note}"`).join("\n");
+
+  const prof = settings.profile || {};
+  const sexLabel = prof.sex === "F" ? "Femme" : prof.sex === "M" ? "Homme" : (prof.sex || "non précisé");
+  const age = prof.birthYear ? (today.getFullYear() - Number(prof.birthYear)) : null;
+  const patientLines = [
+    `- Sexe : ${sexLabel}`,
+    age ? `- Âge : ${age} ans` : null,
+    prof.conditions ? `- Antécédents / maladies chroniques : ${prof.conditions}` : null,
+    prof.treatments ? `- Traitement de fond actuel : ${prof.treatments}` : null,
+  ].filter(Boolean).join("\n");
+
+  return `Analyse le journal de migraines ci-dessous et rédige un compte rendu pour le médecin traitant.
+
+Profil patient :
+${patientLines}
+
+Médicaments aigus (schéma de prise) :
 ${meds.map(m => { const md = medOf(m); return `- ${md.name}${md.maxDoses >= 2 ? ` : jusqu'à 2 prises, 2e possible après ~${md.intervalH ?? "?"}h` : " : 1 prise"}`; }).join("\n") || "- non renseignés"}
-Note : une 2e prise (notée « croix ») peut indiquer une efficacité partielle de la 1re. Tiens-en compte dans l'évaluation de l'efficacité des traitements.
+Note : une 2e prise (« croix ») peut indiquer une efficacité partielle de la 1re prise.
 
---- ÉPISODES ---
-${epTxt || "Aucun épisode enregistré."}
+Période analysée : ${monthly.length} mois enregistré(s).
+
+--- RÉCAP MENSUEL (du plus ancien au plus récent) ---
+${recap || "Aucune donnée."}
+
+--- DÉTAIL DU MOIS COURANT (${MONTHS[month]} ${year}) ---
+${detail}
 ---
 
-Produis une analyse structurée :
+--- NOTES DU PATIENT (toute la période) ---
+${notesTxt || "Aucune note."}
+---
 
-1. RÉSUMÉ CLINIQUE — fréquence, durée, intensité moyennes ; classification probable ; caractéristiques de l'aura si présente.
-2. ANALYSE DES SYMPTÔMES ASSOCIÉS — signes végétatifs, caractère pulsatile vs sourd, latéralisation, lien menstruel.
-3. EFFICACITÉ DES TRAITEMENTS AIGUS — fréquence d'utilisation, contexte, évaluation de l'adéquation.
-4. PATTERNS ET FACTEURS DÉCLENCHANTS — récurrence temporelle, corrélations menstruation/prophylaxie.
-5. RECOMMANDATIONS POUR LE MÉDECIN — points d'attention, ajustements thérapeutiques, critères de chronicisation.
+Produis une analyse structurée et factuelle (titres en MAJUSCULES) :
 
-Sois factuel et prudent. Indique quand les données sont insuffisantes.`;
+1. RÉSUMÉ CLINIQUE — fréquence, durée, intensité moyennes ; classification probable ; aura.
+2. SYMPTÔMES ASSOCIÉS — signes végétatifs, pulsatile vs sourd, latéralisation, lien menstruel le cas échéant.
+3. EFFICACITÉ DES TRAITEMENTS AIGUS — fréquence par médicament, fréquence des 2e prises (efficacité partielle), adéquation.
+4. TENDANCE & RISQUES — évolution de la fréquence mensuelle sur la période ; risque de céphalée par ABUS MÉDICAMENTEUX (triptans ≥10 j/mois OU antalgiques simples ≥15 j/mois, sur >3 mois) ; risque de CHRONICISATION (≥15 j de céphalée/mois sur >3 mois). Indique, mois par mois, si les seuils sont atteints ou approchés.
+5. PATTERNS & FACTEURS DÉCLENCHANTS — récurrence temporelle, corrélations, en t'appuyant aussi sur les NOTES du patient (déclencheurs et contexte rapportés).
+6. RECOMMANDATIONS POUR LE MÉDECIN — points d'attention, ajustements, pertinence d'un traitement de fond, en tenant compte du profil (âge, sexe, comorbidités, traitement de fond).
+
+Sois prudent. Signale explicitement si les données sont insuffisantes (peu de mois ou d'épisodes).`;
 }
 
 function intensityColor(val) {
@@ -194,7 +230,8 @@ function intensityColor(val) {
 function exportPDF(year, month, data, settings, aiResult) {
   const meds = settings.meds;
   const days = daysInMonth(year, month);
-  const allRows = [...ROWS, ...meds.map((m,i) => { const md = medOf(m); return { key:`med_${i}`, label: md.name, type:"medcheck", maxDoses: md.maxDoses }; })];
+  const baseRows = ROWS.filter(r => !(r.key === "menstruation" && settings.profile?.sex === "M"));
+  const allRows = [...baseRows, ...meds.map((m,i) => { const md = medOf(m); return { key:`med_${i}`, label: md.name, type:"medcheck", maxDoses: md.maxDoses }; })];
   const episodes = buildEpisodes(data, meds);
   const synthese = computeSynthese(episodes, meds);
   const cv = (day,row) => {
@@ -204,12 +241,12 @@ function exportPDF(year, month, data, settings, aiResult) {
     return v||"";
   };
   const tableRows = allRows.filter(r=>r.key!=="note").map(row => {
-    const cells = Array.from({length:days},(_,i)=>i+1).map(d=>`<td style="text-align:center;font-size:9px;padding:1px;border:0.5px solid #ccc;min-width:18px">${cv(d,row)}</td>`).join("");
-    return `<tr><td style="font-size:9px;padding:2px 4px;border:0.5px solid #ccc;white-space:nowrap">${row.label}</td>${cells}</tr>`;
+    const cells = Array.from({length:days},(_,i)=>i+1).map(d=>`<td style="text-align:center;font-size:13px;padding:4px 2px;border:0.5px solid #ccc;min-width:26px">${cv(d,row)}</td>`).join("");
+    return `<tr><td style="font-size:13px;padding:5px 8px;border:0.5px solid #ccc;white-space:nowrap">${row.label}</td>${cells}</tr>`;
   }).join("");
-  const synHtml = synthese ? `<div style="margin-top:20px"><h3 style="font-size:11px;color:#185FA5;margin-bottom:8px">Synthèse</h3><table style="font-size:10px;border-collapse:collapse"><tr><td style="padding:2px 8px 2px 0;color:#555">Épisodes</td><td>${synthese.count}</td></tr><tr><td style="padding:2px 8px 2px 0;color:#555">Intensité moy.</td><td>${synthese.avgInt}/10</td></tr><tr><td style="padding:2px 8px 2px 0;color:#555">Durée moy.</td><td>${synthese.avgDur}h</td></tr>${synthese.medCounts.filter(m=>m.count>0).map(m=>`<tr><td style="padding:2px 8px 2px 0;color:#555">${m.name}</td><td>${m.count} prise(s) sur ${m.days} jour(s)${m.double?` (dont ${m.double} 2ᵉ prise)`:""}</td></tr>`).join("")}</table></div>` : "";
-  const aiHtml  = aiResult ? `<div style="margin-top:24px;page-break-before:always"><h3 style="font-size:12px;color:#185FA5;margin-bottom:10px">Analyse médicale (Claude)</h3><div style="font-size:10px;line-height:1.7;white-space:pre-wrap">${aiResult}</div></div>` : "";
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>MigraineLog ${MONTHS[month]} ${year}</title><style>@media print{.np{display:none!important;}}</style></head><body style="font-family:Arial,sans-serif;padding:20px;color:#222"><div style="display:flex;justify-content:space-between;margin-bottom:16px"><div><h1 style="font-size:16px;margin:0 0 4px">MigraineLog</h1><p style="font-size:12px;color:#555;margin:0">${MONTHS[month]} ${year}</p></div><button class="np" onclick="window.print()" style="padding:6px 14px;font-size:12px;cursor:pointer">Imprimer / PDF</button></div><div style="overflow-x:auto"><table style="border-collapse:collapse"><thead><tr style="background:#f0f4fa"><th style="padding:4px 8px;text-align:left;font-size:9px;border:0.5px solid #ccc;min-width:120px">Symptôme</th>${Array.from({length:days},(_,i)=>`<th style="text-align:center;font-size:9px;padding:2px;border:0.5px solid #ccc;min-width:18px">${i+1}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table></div>${synHtml}${aiHtml}</body></html>`;
+  const synHtml = synthese ? `<div style="margin-top:24px"><h3 style="font-size:17px;color:#185FA5;margin-bottom:10px">Synthèse</h3><table style="font-size:14px;border-collapse:collapse"><tr><td style="padding:3px 12px 3px 0;color:#555">Épisodes</td><td>${synthese.count}</td></tr><tr><td style="padding:3px 12px 3px 0;color:#555">Intensité moy.</td><td>${synthese.avgInt}/10</td></tr><tr><td style="padding:3px 12px 3px 0;color:#555">Durée moy.</td><td>${synthese.avgDur}h</td></tr>${synthese.medCounts.filter(m=>m.count>0).map(m=>`<tr><td style="padding:3px 12px 3px 0;color:#555">${m.name}</td><td>${m.count} prise(s) sur ${m.days} jour(s)${m.double?` (dont ${m.double} 2ᵉ prise)`:""}</td></tr>`).join("")}</table></div>` : "";
+  const aiHtml  = aiResult ? `<div style="margin-top:28px;page-break-before:always"><h3 style="font-size:18px;color:#185FA5;margin-bottom:12px">Analyse médicale (IA locale)</h3><div style="font-size:14px;line-height:1.7;white-space:pre-wrap">${aiResult}</div></div>` : "";
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>MigraineLog ${MONTHS[month]} ${year}</title><style>@page{size:A4 landscape;margin:10mm;}@media print{.np{display:none!important;}}</style></head><body style="font-family:Arial,sans-serif;padding:20px;color:#222"><div style="display:flex;justify-content:space-between;margin-bottom:18px"><div><h1 style="font-size:24px;margin:0 0 4px">MigraineLog</h1><p style="font-size:15px;color:#555;margin:0">${MONTHS[month]} ${year}</p></div><button class="np" onclick="window.print()" style="padding:8px 16px;font-size:14px;cursor:pointer">Imprimer / PDF</button></div><div style="overflow-x:auto"><table style="border-collapse:collapse"><thead><tr style="background:#f0f4fa"><th style="padding:6px 10px;text-align:left;font-size:13px;border:0.5px solid #ccc;min-width:160px">Symptôme</th>${Array.from({length:days},(_,i)=>`<th style="text-align:center;font-size:13px;padding:4px 2px;border:0.5px solid #ccc;min-width:26px">${i+1}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table></div>${synHtml}${aiHtml}</body></html>`;
   const w = window.open("","_blank"); w.document.write(html); w.document.close();
 }
 
@@ -225,6 +262,7 @@ export default function App() {
   const [aiResult,  setAiResult]  = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError,   setAiError]   = useState("");
+  const [aiMonths,  setAiMonths]  = useState("all"); // fenêtre d'historique pour l'analyse IA
   const [noteModal, setNoteModal] = useState(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [annualYear, setAnnualYear] = useState(today.getFullYear());
@@ -325,13 +363,15 @@ export default function App() {
     if (dir) { setDataDir(dir); showToast("Dossier mis à jour"); }
   };
 
+  const updateProfile = (patch) => { const profile = { ...(settings.profile||{}), ...patch }; const s={...settings,profile}; setSettings(s); saveFile(settingsFile(),s); };
   const addMed    = () => { const meds=[...settings.meds,{ name:`Médicament ${settings.meds.length+1}`, maxDoses:1, intervalH:null }]; const s={...settings,meds}; setSettings(s); saveFile(settingsFile(),s); };
   const updateMed = (i,patch) => { const meds=settings.meds.map((m,idx)=> idx===i ? { ...medOf(m), ...patch } : m); const s={...settings,meds}; setSettings(s); saveFile(settingsFile(),s); };
   const deleteMed = (i) => { const meds=settings.meds.filter((_,idx)=>idx!==i); const s={...settings,meds}; setSettings(s); saveFile(settingsFile(),s); setConfirmDel(null); };
 
   const episodes = buildEpisodes(data, settings.meds);
   const synthese = computeSynthese(episodes, settings.meds);
-  const allRows  = [...ROWS, ...settings.meds.map((m,i) => { const md = medOf(m); return { key:`med_${i}`, label: md.name, type:"medcheck", idx:i, maxDoses: md.maxDoses, intervalH: md.intervalH }; })];
+  const baseRows = ROWS.filter(r => !(r.key === "menstruation" && settings.profile?.sex === "M"));
+  const allRows  = [...baseRows, ...settings.meds.map((m,i) => { const md = medOf(m); return { key:`med_${i}`, label: md.name, type:"medcheck", idx:i, maxDoses: md.maxDoses, intervalH: md.intervalH }; })];
 
   const [ollamaStatus, setOllamaStatus] = useState({ binExists: false, modelExists: false, running: false });
   const [ollamaSetupRunning, setOllamaSetupRunning] = useState(false);
@@ -359,7 +399,7 @@ export default function App() {
     "download-ollama": "Téléchargement du moteur IA…",
     "extract-ollama":  "Extraction du moteur IA…",
     "starting":        "Démarrage du moteur IA…",
-    "download-model":  "Téléchargement du modèle médical (≈4 Go)…",
+    "download-model":  "Téléchargement du modèle IA (≈2 Go)…",
     "ready":           "Prêt",
   };
 
@@ -368,7 +408,12 @@ export default function App() {
     try {
       if (!ollamaStatus.running) await window.electronAPI.ollamaStart();
       const allData = await getAllMonthsData(settings.meds);
-      const prompt = buildPrompt(episodes, allData, settings, year, month);
+      // Fenêtre d'historique : "all" = tout, sinon les N derniers mois jusqu'au mois courant
+      const curIdx = year * 12 + month;
+      const windowData = aiMonths === "all"
+        ? allData
+        : allData.filter(({ year: y, month: m }) => { const idx = y * 12 + m; return idx <= curIdx && idx > curIdx - aiMonths; });
+      const prompt = buildPrompt(episodes, windowData, settings, year, month);
       let text = "";
       if (isElectron) {
         text = await window.electronAPI.ollamaAnalyze(prompt);
@@ -469,7 +514,7 @@ export default function App() {
       {/* GRID */}
       {view==="grid"&&(
         <>
-          <div style={{overflowX:"auto",borderRadius:"var(--border-radius-lg)",border:"0.5px solid var(--color-border-tertiary)"}}>
+          <div style={{overflowX:"auto",borderRadius:"var(--border-radius-lg)",border:"0.5px solid var(--color-border-tertiary)",width:"fit-content",maxWidth:"100%",margin:"0 auto"}}>
             <table style={{borderCollapse:"collapse",tableLayout:"fixed",width:LABEL_W+days*CELL+"px"}}>
               <thead>
                 <tr style={{background:"var(--color-background-secondary)"}}>
@@ -621,8 +666,8 @@ export default function App() {
             <div style={{background:"var(--color-background-secondary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem",marginBottom:16}}>
               <p style={{fontWeight:500,marginBottom:4}}>Moteur IA local non installé</p>
               <p style={{color:"var(--color-text-secondary)",fontSize:12,marginBottom:12,lineHeight:1.6}}>
-                L'analyse médicale utilise un modèle IA médical qui s'exécute entièrement sur votre machine. Aucune donnée ne quitte votre ordinateur.<br/>
-                <strong>Première installation : ~4 Go à télécharger.</strong> Cette opération est unique.
+                L'analyse utilise un modèle d'IA qui s'exécute entièrement sur votre machine. Aucune donnée ne quitte votre ordinateur.<br/>
+                <strong>Première installation : moteur + modèle (~2 Go) à télécharger.</strong> Cette opération est unique.
               </p>
               {ollamaSetupRunning ? (
                 <div>
@@ -649,11 +694,23 @@ export default function App() {
             <div style={{background:"var(--color-background-secondary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem",marginBottom:16}}>
               <p style={{fontWeight:500,marginBottom:4}}>Analyse médicale {isElectron ? "(IA locale)" : "(Claude)"}</p>
               <p style={{color:"var(--color-text-secondary)",fontSize:12,marginBottom:12,lineHeight:1.6}}>
-                Analyse du mois en cours. Si moins de 3 épisodes, l'historique complet est utilisé. Destiné à être relu par votre médecin.
+                Récap mensuel sur la période choisie + détail du mois courant, avec tendances et risques (chronicisation, abus médicamenteux). Destiné à être relu par votre médecin.
               </p>
-              <button onClick={launchAI} disabled={aiLoading} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 16px"}}>
-                {aiLoading?<><i className="ti ti-loader-2" style={{fontSize:16}} aria-hidden="true"></i> Analyse en cours…</>:<><i className="ti ti-brain" style={{fontSize:16}} aria-hidden="true"></i> Lancer l'analyse</>}
-              </button>
+              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <label style={{fontSize:12,color:"var(--color-text-secondary)",display:"flex",alignItems:"center",gap:6}}>
+                  Historique
+                  <select value={aiMonths} onChange={e=>setAiMonths(e.target.value==="all"?"all":Number(e.target.value))} style={{fontSize:12}}>
+                    <option value={1}>Mois courant</option>
+                    <option value={3}>3 derniers mois</option>
+                    <option value={6}>6 derniers mois</option>
+                    <option value={12}>12 derniers mois</option>
+                    <option value="all">Tout l'historique</option>
+                  </select>
+                </label>
+                <button onClick={launchAI} disabled={aiLoading} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 16px"}}>
+                  {aiLoading?<><i className="ti ti-loader-2" style={{fontSize:16}} aria-hidden="true"></i> Analyse en cours…</>:<><i className="ti ti-brain" style={{fontSize:16}} aria-hidden="true"></i> Lancer l'analyse</>}
+                </button>
+              </div>
             </div>
           )}
 
@@ -676,6 +733,34 @@ export default function App() {
       {/* SETTINGS */}
       {view==="settings"&&(
         <div style={{background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem"}}>
+          <p style={{fontWeight:500,marginBottom:4,fontSize:14}}>Profil patient</p>
+          <p style={{color:"var(--color-text-secondary)",fontSize:11,marginBottom:12,lineHeight:1.6}}>
+            Ces informations affinent l'analyse IA et adaptent la grille (ex. la ligne « Menstruation » est masquée pour un homme).
+          </p>
+          <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:10}}>
+            <label style={{fontSize:12,color:"var(--color-text-secondary)",display:"flex",flexDirection:"column",gap:4}}>
+              Sexe
+              <select value={settings.profile?.sex ?? ""} onChange={e=>updateProfile({sex:e.target.value})} style={{fontSize:13}}>
+                <option value="">Non précisé</option>
+                <option value="F">Femme</option>
+                <option value="M">Homme</option>
+              </select>
+            </label>
+            <label style={{fontSize:12,color:"var(--color-text-secondary)",display:"flex",flexDirection:"column",gap:4}}>
+              Année de naissance
+              <input type="number" min="1900" max={today.getFullYear()} value={settings.profile?.birthYear ?? ""} onChange={e=>updateProfile({birthYear: e.target.value===""?"":Number(e.target.value)})} placeholder="ex. 1985" style={{width:120}}/>
+            </label>
+          </div>
+          <label style={{fontSize:12,color:"var(--color-text-secondary)",display:"block",marginBottom:10}}>
+            Antécédents / maladies chroniques
+            <textarea value={settings.profile?.conditions ?? ""} onChange={e=>updateProfile({conditions:e.target.value})} placeholder="ex. HTA, dépression, asthme, contraception œstroprogestative…" rows={2} style={{width:"100%",marginTop:4,resize:"vertical"}}/>
+          </label>
+          <label style={{fontSize:12,color:"var(--color-text-secondary)",display:"block",marginBottom:4}}>
+            Traitement de fond actuel
+            <textarea value={settings.profile?.treatments ?? ""} onChange={e=>updateProfile({treatments:e.target.value})} placeholder="ex. propranolol 40 mg, amitriptyline, topiramate…" rows={2} style={{width:"100%",marginTop:4,resize:"vertical"}}/>
+          </label>
+          <div style={{borderTop:"0.5px solid var(--color-border-tertiary)",margin:"16px 0"}}></div>
+
           <p style={{fontWeight:500,marginBottom:4,fontSize:14}}>Médicaments aigus</p>
           <p style={{color:"var(--color-text-secondary)",fontSize:11,marginBottom:12,lineHeight:1.6}}>
             Pour chaque médicament : son nom, le nombre de prises possibles, et le délai avant une 2ᵉ prise (propre au médicament). Dans la grille : <strong style={{color:"var(--color-text-success)"}}>/</strong> = 1 prise · <strong style={{color:"var(--color-text-danger)"}}>✕</strong> = 2 prises. Ces réglages sont transmis à l'analyse IA.

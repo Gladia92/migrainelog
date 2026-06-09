@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, net } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, net, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
@@ -11,11 +11,17 @@ const OLLAMA_BIN  = path.join(OLLAMA_DIR, "ollama.exe");
 const OLLAMA_URL  = "https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip";
 const OLLAMA_ZIP  = path.join(OLLAMA_DIR, "ollama.zip");
 const OLLAMA_MODELS_DIR = path.join(OLLAMA_DIR, "models");
-const MODEL_NAME  = "meditron";
+const MODEL_NAME  = "llama3.2"; // bon suivi d'instructions en FR ; meditron (base) produisait du charabia
 let ollamaProcess = null;
 
 function ensureOllamaDir() {
   if (!fs.existsSync(OLLAMA_DIR)) fs.mkdirSync(OLLAMA_DIR, { recursive: true });
+}
+
+// Le vrai ollama.exe pèse des dizaines de Mo. Un fichier minuscule = corrompu
+// (vestige d'un téléchargement raté) -> à re-télécharger, sinon "spawn UNKNOWN".
+function ollamaBinValid() {
+  try { return fs.statSync(OLLAMA_BIN).size > 10 * 1024 * 1024; } catch { return false; }
 }
 
 // ── Téléchargement via electron net (contourne les restrictions CSP)
@@ -51,8 +57,16 @@ function downloadFile(url, dest, onProgress) {
 // dû à la résolution du nom court.
 function extractZip(zipPath, destDir) {
   return new Promise((resolve, reject) => {
-    const cmd = `tar -xf "${zipPath}" -C "${destDir}"`;
-    const p = spawn(cmd, { shell: true, windowsHide: true });
+    // Chemin complet vers tar.exe (intégré à Windows) : pas de résolution de nom,
+    // pas de shell, args en tableau -> évite "spawn UNKNOWN".
+    const tarExe = path.join(process.env.SystemRoot || process.env.windir || "C:\\Windows", "System32", "tar.exe");
+    let p;
+    try {
+      p = spawn(tarExe, ["-xf", zipPath, "-C", destDir], { windowsHide: true });
+    } catch (e) {
+      reject(new Error("Extraction (tar) — lancement impossible: " + e.message));
+      return;
+    }
     let err = "";
     p.stderr.on("data", d => { err += d.toString(); });
     p.on("close", code => code === 0 ? resolve() : reject(new Error("Extraction (tar) échouée code " + code + ": " + err)));
@@ -62,10 +76,15 @@ function extractZip(zipPath, destDir) {
 
 function startOllama() {
   return new Promise((resolve, reject) => {
-    ollamaProcess = spawn(OLLAMA_BIN, ["serve"], {
-      env: { ...process.env, OLLAMA_MODELS: OLLAMA_MODELS_DIR },
-      detached: false, stdio: "ignore", windowsHide: true
-    });
+    try {
+      ollamaProcess = spawn(OLLAMA_BIN, ["serve"], {
+        env: { ...process.env, OLLAMA_MODELS: OLLAMA_MODELS_DIR },
+        detached: false, stdio: "ignore", windowsHide: true
+      });
+    } catch (e) {
+      reject(new Error("Démarrage du moteur (ollama serve) — lancement impossible: " + e.message));
+      return;
+    }
     ollamaProcess.on("error", e => reject(new Error("Démarrage du moteur (ollama serve): " + e.message)));
     setTimeout(resolve, 2000);
   });
@@ -87,11 +106,16 @@ const DATA_DIR = path.join(os.homedir(), "Documents", "MigraineLog");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 function createWindow() {
+  // Largeur visée pour afficher le calendrier complet (libellé 200 + 31 jours × 36
+  // + marges du #root + barre de défilement verticale). Plafonnée à l'écran dispo.
+  const work = screen.getPrimaryDisplay().workAreaSize;
+  const CALENDAR_WIDTH = 1390;
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: Math.min(CALENDAR_WIDTH, work.width),
+    height: Math.min(900, work.height),
     minWidth: 800,
     minHeight: 600,
+    useContentSize: true, // width/height = zone de contenu (web), hors cadre fenêtre
     title: "MigraineLog",
     icon: path.join(__dirname, "icon.png"),
     webPreferences: {
@@ -100,6 +124,7 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+  win.center();
   if (isDev) {
     win.loadURL("http://localhost:5173");
   } else {
@@ -171,10 +196,25 @@ ipcMain.handle("import-json", async (e) => {
 
 // ── IPC : statut Ollama
 ipcMain.handle("ollama-status", async () => {
-  const binExists   = fs.existsSync(OLLAMA_BIN);
-  const modelPath   = path.join(OLLAMA_DIR, "models", "manifests", "registry.ollama.ai", "library", MODEL_NAME);
-  const modelExists = fs.existsSync(modelPath);
-  const running     = await ollamaRunning();
+  const running = await ollamaRunning();
+  let modelExists = false;
+  // Le modèle peut être servi par notre moteur OU par un Ollama système déjà lancé.
+  // On interroge l'API (peu importe l'emplacement disque) plutôt que de deviner le chemin.
+  if (running) {
+    try {
+      const r = await fetch("http://127.0.0.1:11434/api/tags", { signal: AbortSignal.timeout(3000) });
+      if (r.ok) {
+        const j = await r.json();
+        modelExists = (j.models || []).some(m => (m.name || "").startsWith(MODEL_NAME));
+      }
+    } catch { /* ignore */ }
+  }
+  if (!modelExists) {
+    // Repli disque : modèle présent dans notre dossier mais serveur pas encore lancé
+    const modelPath = path.join(OLLAMA_MODELS_DIR, "manifests", "registry.ollama.ai", "library", MODEL_NAME);
+    modelExists = fs.existsSync(modelPath);
+  }
+  const binExists = ollamaBinValid() || running; // un serveur qui tourne = moteur dispo
   return { binExists, modelExists, running };
 });
 
@@ -186,7 +226,9 @@ ipcMain.handle("ollama-setup", async (e) => {
   try {
     ensureOllamaDir();
 
-    if (!fs.existsSync(OLLAMA_BIN)) {
+    if (!ollamaBinValid()) {
+      // Supprime un éventuel ollama.exe corrompu (trop petit) issu d'un ancien échec
+      try { if (fs.existsSync(OLLAMA_BIN)) fs.unlinkSync(OLLAMA_BIN); } catch {}
       // Réutilise un zip déjà téléchargé (évite de re-télécharger 1,46 Go après un échec d'extraction)
       const haveZip = fs.existsSync(OLLAMA_ZIP) && fs.statSync(OLLAMA_ZIP).size > 1000000;
       if (!haveZip) {
@@ -197,7 +239,7 @@ ipcMain.handle("ollama-setup", async (e) => {
       if (zsize < 1000000) throw new Error(`Téléchargement du moteur incomplet (${zsize} octets) — URL ou réseau ?`);
       send("extract-ollama", 0);
       await extractZip(OLLAMA_ZIP, OLLAMA_DIR);
-      if (!fs.existsSync(OLLAMA_BIN)) throw new Error("ollama.exe introuvable après extraction");
+      if (!ollamaBinValid()) throw new Error("ollama.exe invalide après extraction");
       try { fs.unlinkSync(OLLAMA_ZIP); } catch {} // on ne supprime qu'après succès
     }
 
@@ -241,13 +283,22 @@ ipcMain.handle("ollama-start", async () => {
   return true;
 });
 
-// ── IPC : analyser avec Ollama
+// ── IPC : analyser avec Ollama (API chat = bien meilleur suivi des consignes)
 ipcMain.handle("ollama-analyze", async (_e, prompt) => {
-  const resp = await fetch("http://127.0.0.1:11434/api/generate", {
+  const resp = await fetch("http://127.0.0.1:11434/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: MODEL_NAME, prompt, stream: false })
+    body: JSON.stringify({
+      model: MODEL_NAME,
+      stream: false,
+      messages: [
+        { role: "system", content: "Tu es un médecin spécialiste des céphalées (neurologue céphalologue). Tu analyses un journal de migraines pour le médecin traitant. Réponds UNIQUEMENT en français, de façon structurée (titres en majuscules + tirets), factuelle et prudente. Prends en compte le profil patient (sexe, âge, antécédents, traitement de fond) pour cibler l'analyse et les recommandations. Ne recopie pas la consigne, n'invente aucune donnée, et fonde-toi strictement sur les informations fournies." },
+        { role: "user", content: prompt }
+      ],
+      options: { temperature: 0.4, num_ctx: 8192 }
+    })
   });
+  if (!resp.ok) throw new Error("Ollama HTTP " + resp.status);
   const json = await resp.json();
-  return json.response || "";
+  return json.message?.content || "";
 });
