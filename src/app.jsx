@@ -1,7 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import * as gdriveMobile from "./gdrive-mobile.js";
 
 // ── Electron bridge (falls back to localStorage in browser dev)
 const isElectron = !!window.electronAPI;
+const isCapacitor = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const syncAvailable = isElectron || isCapacitor;
+
+// Sync Drive : même API côté PC (Electron) et mobile (Capacitor)
+const sync = {
+  signIn:  () => isElectron ? window.electronAPI.gdriveSignIn()  : gdriveMobile.signIn(),
+  signOut: () => isElectron ? window.electronAPI.gdriveSignOut() : gdriveMobile.signOut(),
+  status:  () => isElectron ? window.electronAPI.gdriveStatus()  : gdriveMobile.getStatus(),
+  pull:    () => isElectron ? window.electronAPI.gdrivePull()    : gdriveMobile.pull(),
+  push:    () => isElectron ? window.electronAPI.gdrivePush()    : gdriveMobile.push(),
+};
 
 const ROWS = [
   { key: "intensity", label: "Intensité (1–10)", type: "number", min: 1, max: 10 },
@@ -284,8 +296,8 @@ export default function App() {
       if (isElectron) {
         const dir = await window.electronAPI.getDataDir();
         setDataDir(dir);
-        window.electronAPI.gdriveStatus?.().then(setGsync).catch(()=>{});
       }
+      if (syncAvailable) sync.status().then(setGsync).catch(()=>{});
     })();
   }, []);
 
@@ -296,9 +308,9 @@ export default function App() {
   // Envoi auto vers le Drive après une modification (débounce), si connecté
   const pushTimer = useRef(null);
   useEffect(() => {
-    if (!isElectron || !gsync.connected) return;
+    if (!syncAvailable || !gsync.connected) return;
     if (pushTimer.current) clearTimeout(pushTimer.current);
-    pushTimer.current = setTimeout(() => { window.electronAPI.gdrivePush().catch(()=>{}); }, 2500);
+    pushTimer.current = setTimeout(() => { sync.push().catch(()=>{}); }, 2500);
     return () => { if (pushTimer.current) clearTimeout(pushTimer.current); };
   }, [data, settings, gsync.connected]);
 
@@ -385,11 +397,11 @@ export default function App() {
   const connectGoogle = async () => {
     setSyncBusy(true); setSyncMsg("Connexion à Google…");
     try {
-      setGsync(await window.electronAPI.gdriveSignIn());
+      setGsync(await sync.signIn());
       setSyncMsg("Récupération du journal…");
-      const pulled = await window.electronAPI.gdrivePull();
+      const pulled = await sync.pull();
       if (pulled.empty) {
-        await window.electronAPI.gdrivePush();
+        await sync.push();
         setSyncMsg("Journal envoyé sur ton Drive.");
       } else {
         await reloadFromDisk();
@@ -401,14 +413,14 @@ export default function App() {
 
   const disconnectGoogle = async () => {
     setSyncBusy(true);
-    try { setGsync(await window.electronAPI.gdriveSignOut()); setSyncMsg(""); }
+    try { setGsync(await sync.signOut()); setSyncMsg(""); }
     catch (e) { setSyncMsg("Échec : " + (e?.message || e)); }
     setSyncBusy(false);
   };
 
   const syncNow = async () => {
     setSyncBusy(true); setSyncMsg("Synchronisation…");
-    try { await window.electronAPI.gdrivePush(); setSyncMsg("Synchronisé à l'instant."); }
+    try { await sync.push(); setSyncMsg("Synchronisé à l'instant."); }
     catch (e) { setSyncMsg("Échec : " + (e?.message || e)); }
     setSyncBusy(false);
   };
@@ -508,7 +520,8 @@ export default function App() {
     {id:"grid",    icon:"ti-table",         label:"Grille"},
     {id:"synthese",icon:"ti-chart-bar",     label:"Synthèse"},
     {id:"annual",  icon:"ti-calendar-stats",label:"Annuel"},
-    {id:"ai",      icon:"ti-brain",         label:"Analyse IA"},
+    // L'analyse IA (Ollama local) n'existe que sur l'ordinateur (Option A)
+    ...(isElectron ? [{id:"ai", icon:"ti-brain", label:"Analyse IA"}] : []),
     {id:"settings",icon:"ti-settings",      label:"Paramètres"},
   ];
 
@@ -783,7 +796,7 @@ export default function App() {
       {/* SETTINGS */}
       {view==="settings"&&(
         <div style={{background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem"}}>
-          {isElectron && (
+          {syncAvailable && (
             <>
               <p style={{fontWeight:500,marginBottom:4,fontSize:14}}>Synchronisation</p>
               <p style={{color:"var(--color-text-secondary)",fontSize:11,marginBottom:12,lineHeight:1.6}}>

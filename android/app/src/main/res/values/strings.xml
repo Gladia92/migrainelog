@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MigraineLog</string>
+    <string name="title_activity_main">MigraineLog</string>
+    <string name="package_name">com.migrainelog.app</string>
+    <string name="custom_url_scheme">com.migrainelog.app</string>
+</resources>
