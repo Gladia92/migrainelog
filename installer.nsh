@@ -15,7 +15,8 @@
 !macroend
 
 !macro customUnInstall
-  ; Retire le certificat de confiance à la désinstallation
-  nsExec::Exec 'certutil -user -delstore "Root" "MigraineLog"'
-  nsExec::Exec 'certutil -user -delstore "TrustedPublisher" "MigraineLog"'
+  ; On NE retire PAS le certificat à la désinstallation : sinon, une réinstallation
+  ; (mise à jour) réafficherait "éditeur inconnu" tant que l'installeur n'a pas
+  ; réimporté le certificat — or ce prompt s'affiche AVANT l'installation.
+  ; Garder le certificat de confiance est sans danger (c'est ton propre éditeur).
 !macroend
