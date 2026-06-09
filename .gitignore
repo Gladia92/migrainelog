@@ -151,3 +151,8 @@ cert-base64.txt
 # Secret OAuth Google — NE JAMAIS committer
 google-secret.txt
 google-tokens.json
+
+# Clé de signature Android release — NE JAMAIS committer
+*.keystore
+keystore.properties
+*.jks
