@@ -26,6 +26,10 @@ function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
 function fileKey(y, m)     { return `migraine_${y}_${String(m).padStart(2,"0")}.json`; }
 function settingsFile()    { return "migraine_settings.json"; }
 
+// Dose d'un médicament : 0 = non pris, 1 = pris (1 trait), 2 = 2e prise à 2h (croix).
+// Rétro-compatible avec les anciennes données stockées en booléen (true => 1).
+function medDose(v) { return v === true ? 1 : (Number(v) || 0); }
+
 // ── Storage abstraction
 async function loadFile(filename) {
   if (isElectron) {
@@ -102,7 +106,12 @@ function computeSynthese(episodes, meds) {
     withNausea: episodes.filter(e => e.nausea).length,
     withLight:  episodes.filter(e => e.light).length,
     bilateral:  episodes.filter(e => e.side == 2).length,
-    medCounts:  meds.map((name,i) => ({ name, count: episodes.filter(e => e[`med_${i}`]).length })),
+    medCounts:  meds.map((name,i) => ({
+      name,
+      count:  episodes.reduce((s,e) => s + medDose(e[`med_${i}`]), 0),   // total de prises
+      days:   episodes.filter(e => medDose(e[`med_${i}`]) > 0).length,   // jours avec prise
+      double: episodes.filter(e => medDose(e[`med_${i}`]) >= 2).length,  // jours avec 2e prise
+    })),
   };
 }
 
@@ -122,7 +131,7 @@ function buildPrompt(episodes, allData, settings, year, month) {
     if (e.smell)     p.push("osmophobie");
     if (e.menstruation) p.push("menstruation");
     if (e.prophylaxis)  p.push("début prophylaxie");
-    meds.forEach((name,i) => { if (e[`med_${i}`]) p.push(`pris: ${name}`); });
+    meds.forEach((name,i) => { const n = medDose(e[`med_${i}`]); if (n >= 2) p.push(`pris: ${name} (2 prises, 2e à ~2h)`); else if (n === 1) p.push(`pris: ${name}`); });
     if (e.note) p.push(`note: "${e.note}"`);
     return p.join(" | ");
   };
@@ -170,12 +179,17 @@ function exportPDF(year, month, data, settings, aiResult) {
   const allRows = [...ROWS, ...meds.map((m,i) => ({ key:`med_${i}`, label:m, type:"medcheck" }))];
   const episodes = buildEpisodes(data, meds);
   const synthese = computeSynthese(episodes, meds);
-  const cv = (day,key) => { const v = data[`d${day}`]?.[key]??""; if(v===true||v===1)return"✓"; return v||""; };
+  const cv = (day,row) => {
+    const v = data[`d${day}`]?.[row.key]??"";
+    if (row.type==="medcheck") { const n = medDose(v); return n>=2 ? "✕" : n===1 ? "/" : ""; }
+    if (v===true||v===1) return "✓";
+    return v||"";
+  };
   const tableRows = allRows.filter(r=>r.key!=="note").map(row => {
-    const cells = Array.from({length:days},(_,i)=>i+1).map(d=>`<td style="text-align:center;font-size:9px;padding:1px;border:0.5px solid #ccc;min-width:18px">${cv(d,row.key)}</td>`).join("");
+    const cells = Array.from({length:days},(_,i)=>i+1).map(d=>`<td style="text-align:center;font-size:9px;padding:1px;border:0.5px solid #ccc;min-width:18px">${cv(d,row)}</td>`).join("");
     return `<tr><td style="font-size:9px;padding:2px 4px;border:0.5px solid #ccc;white-space:nowrap">${row.label}</td>${cells}</tr>`;
   }).join("");
-  const synHtml = synthese ? `<div style="margin-top:20px"><h3 style="font-size:11px;color:#185FA5;margin-bottom:8px">Synthèse</h3><table style="font-size:10px;border-collapse:collapse"><tr><td style="padding:2px 8px 2px 0;color:#555">Épisodes</td><td>${synthese.count}</td></tr><tr><td style="padding:2px 8px 2px 0;color:#555">Intensité moy.</td><td>${synthese.avgInt}/10</td></tr><tr><td style="padding:2px 8px 2px 0;color:#555">Durée moy.</td><td>${synthese.avgDur}h</td></tr>${synthese.medCounts.filter(m=>m.count>0).map(m=>`<tr><td style="padding:2px 8px 2px 0;color:#555">${m.name}</td><td>${m.count} prise(s)</td></tr>`).join("")}</table></div>` : "";
+  const synHtml = synthese ? `<div style="margin-top:20px"><h3 style="font-size:11px;color:#185FA5;margin-bottom:8px">Synthèse</h3><table style="font-size:10px;border-collapse:collapse"><tr><td style="padding:2px 8px 2px 0;color:#555">Épisodes</td><td>${synthese.count}</td></tr><tr><td style="padding:2px 8px 2px 0;color:#555">Intensité moy.</td><td>${synthese.avgInt}/10</td></tr><tr><td style="padding:2px 8px 2px 0;color:#555">Durée moy.</td><td>${synthese.avgDur}h</td></tr>${synthese.medCounts.filter(m=>m.count>0).map(m=>`<tr><td style="padding:2px 8px 2px 0;color:#555">${m.name}</td><td>${m.count} prise(s) sur ${m.days} jour(s)${m.double?` (dont ${m.double} 2ᵉ prise)`:""}</td></tr>`).join("")}</table></div>` : "";
   const aiHtml  = aiResult ? `<div style="margin-top:24px;page-break-before:always"><h3 style="font-size:12px;color:#185FA5;margin-bottom:10px">Analyse médicale (Claude)</h3><div style="font-size:10px;line-height:1.7;white-space:pre-wrap">${aiResult}</div></div>` : "";
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>MigraineLog ${MONTHS[month]} ${year}</title><style>@media print{.np{display:none!important;}}</style></head><body style="font-family:Arial,sans-serif;padding:20px;color:#222"><div style="display:flex;justify-content:space-between;margin-bottom:16px"><div><h1 style="font-size:16px;margin:0 0 4px">MigraineLog</h1><p style="font-size:12px;color:#555;margin:0">${MONTHS[month]} ${year}</p></div><button class="np" onclick="window.print()" style="padding:6px 14px;font-size:12px;cursor:pointer">Imprimer / PDF</button></div><div style="overflow-x:auto"><table style="border-collapse:collapse"><thead><tr style="background:#f0f4fa"><th style="padding:4px 8px;text-align:left;font-size:9px;border:0.5px solid #ccc;min-width:120px">Symptôme</th>${Array.from({length:days},(_,i)=>`<th style="text-align:center;font-size:9px;padding:2px;border:0.5px solid #ccc;min-width:18px">${i+1}</th>`).join("")}</tr></thead><tbody>${tableRows}</tbody></table></div>${synHtml}${aiHtml}</body></html>`;
   const w = window.open("","_blank"); w.document.write(html); w.document.close();
@@ -476,7 +490,7 @@ export default function App() {
             </table>
           </div>
           <div style={{color:"var(--color-text-secondary)",fontSize:11,marginTop:8}}>
-            ✓ = présent · clic = effacer · 1/2 = uni/bilatéral
+            ✓ = présent · 1/2 = uni/bilatéral · médicaments : <strong style={{color:"var(--color-text-success)"}}>/</strong> = pris · <strong style={{color:"var(--color-text-danger)"}}>✕</strong> = 2ᵉ prise à 2h · clic pour changer
           </div>
         </>
       )}
@@ -732,6 +746,13 @@ function CellInput({row,val,onChange}){
   const s={width:32,height:26,textAlign:"center",fontSize:12,border:"none",background:"transparent",color:"var(--color-text-primary)",cursor:"pointer",padding:0};
   if(row.type==="number")return(<input type="number" min={row.min} max={row.max} value={val} onChange={e=>onChange(e.target.value===""?"":Number(e.target.value))} style={{...s}} placeholder="–"/>);
   if(row.type==="side"){const cycle={"":"1","1":"2","2":""};return <button onClick={()=>onChange(cycle[val]??"")} style={{...s,fontWeight:500,color:val?"var(--color-text-primary)":"var(--color-text-tertiary)"}}>{val||"–"}</button>;}
-  if(row.type==="bool"||row.type==="medcheck")return(<button onClick={()=>onChange(val?"":true)} style={{...s,color:val?"var(--color-text-success)":"var(--color-text-tertiary)"}} aria-label={val?"Effacer":"Marquer"}>{val?<i className="ti ti-check" style={{fontSize:14}} aria-hidden="true"></i>:<span style={{fontSize:11}}>–</span>}</button>);
+  if(row.type==="medcheck"){
+    const n = medDose(val);
+    const next = n===0 ? 1 : n===1 ? 2 : "";        // vide -> 1 trait -> croix -> vide
+    const glyph = n===1 ? "/" : n===2 ? "✕" : "–";
+    const col = n===2 ? "var(--color-text-danger)" : n===1 ? "var(--color-text-success)" : "var(--color-text-tertiary)";
+    return(<button onClick={()=>onChange(next)} title="Vide → 1 trait (pris) → croix (2ᵉ prise à 2h)" style={{...s,color:col,fontWeight:700,fontSize:15}} aria-label="Prise de médicament">{glyph}</button>);
+  }
+  if(row.type==="bool")return(<button onClick={()=>onChange(val?"":true)} style={{...s,color:val?"var(--color-text-success)":"var(--color-text-tertiary)"}} aria-label={val?"Effacer":"Marquer"}>{val?<i className="ti ti-check" style={{fontSize:14}} aria-hidden="true"></i>:<span style={{fontSize:11}}>–</span>}</button>);
   return null;
 }
