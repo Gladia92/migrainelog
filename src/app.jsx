@@ -26,9 +26,16 @@ function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
 function fileKey(y, m)     { return `migraine_${y}_${String(m).padStart(2,"0")}.json`; }
 function settingsFile()    { return "migraine_settings.json"; }
 
-// Dose d'un médicament : 0 = non pris, 1 = pris (1 trait), 2 = 2e prise à 2h (croix).
+// Dose d'un médicament sur un jour : 0 = non pris, 1 = 1 prise (1 trait), 2 = 2 prises (croix).
 // Rétro-compatible avec les anciennes données stockées en booléen (true => 1).
 function medDose(v) { return v === true ? 1 : (Number(v) || 0); }
+
+// Un médicament peut être une simple chaîne (ancien format) ou un objet de config.
+// Normalise en { name, maxDoses (1 ou 2), intervalH (délai entre 2 prises, en heures) }.
+function medOf(m) {
+  if (typeof m === "string") return { name: m, maxDoses: 1, intervalH: null };
+  return { name: m?.name || "", maxDoses: m?.maxDoses === 2 ? 2 : 1, intervalH: (m?.intervalH ?? null) };
+}
 
 // ── Storage abstraction
 async function loadFile(filename) {
@@ -106,12 +113,16 @@ function computeSynthese(episodes, meds) {
     withNausea: episodes.filter(e => e.nausea).length,
     withLight:  episodes.filter(e => e.light).length,
     bilateral:  episodes.filter(e => e.side == 2).length,
-    medCounts:  meds.map((name,i) => ({
-      name,
-      count:  episodes.reduce((s,e) => s + medDose(e[`med_${i}`]), 0),   // total de prises
-      days:   episodes.filter(e => medDose(e[`med_${i}`]) > 0).length,   // jours avec prise
-      double: episodes.filter(e => medDose(e[`med_${i}`]) >= 2).length,  // jours avec 2e prise
-    })),
+    medCounts:  meds.map((m,i) => {
+      const md = medOf(m);
+      const dose = e => Math.min(medDose(e[`med_${i}`]), md.maxDoses);
+      return {
+        name: md.name, maxDoses: md.maxDoses, intervalH: md.intervalH,
+        count:  episodes.reduce((s,e) => s + dose(e), 0),   // total de prises
+        days:   episodes.filter(e => dose(e) > 0).length,   // jours avec prise
+        double: episodes.filter(e => dose(e) >= 2).length,  // jours avec 2e prise
+      };
+    }),
   };
 }
 
@@ -131,7 +142,12 @@ function buildPrompt(episodes, allData, settings, year, month) {
     if (e.smell)     p.push("osmophobie");
     if (e.menstruation) p.push("menstruation");
     if (e.prophylaxis)  p.push("début prophylaxie");
-    meds.forEach((name,i) => { const n = medDose(e[`med_${i}`]); if (n >= 2) p.push(`pris: ${name} (2 prises, 2e à ~2h)`); else if (n === 1) p.push(`pris: ${name}`); });
+    meds.forEach((m,i) => {
+      const md = medOf(m);
+      const n = Math.min(medDose(e[`med_${i}`]), md.maxDoses);
+      if (n >= 2) p.push(`pris: ${md.name} (2 prises, 2e à ~${md.intervalH ?? "?"}h)`);
+      else if (n === 1) p.push(`pris: ${md.name}`);
+    });
     if (e.note) p.push(`note: "${e.note}"`);
     return p.join(" | ");
   };
@@ -147,7 +163,9 @@ function buildPrompt(episodes, allData, settings, year, month) {
   return `Tu es un assistant médical spécialisé en céphalologie. Tu analyses un journal de migraines. Ton analyse sera relue par le médecin traitant. Rédige en français, de manière structurée et médicalement rigoureuse.
 
 Données : ${scope}
-Médicaments aigus : ${meds.join(", ") || "non renseignés"}
+Médicaments aigus (et schéma de prise) :
+${meds.map(m => { const md = medOf(m); return `- ${md.name}${md.maxDoses >= 2 ? ` : jusqu'à 2 prises, 2e possible après ~${md.intervalH ?? "?"}h` : " : 1 prise"}`; }).join("\n") || "- non renseignés"}
+Note : une 2e prise (notée « croix ») peut indiquer une efficacité partielle de la 1re. Tiens-en compte dans l'évaluation de l'efficacité des traitements.
 
 --- ÉPISODES ---
 ${epTxt || "Aucun épisode enregistré."}
@@ -176,12 +194,12 @@ function intensityColor(val) {
 function exportPDF(year, month, data, settings, aiResult) {
   const meds = settings.meds;
   const days = daysInMonth(year, month);
-  const allRows = [...ROWS, ...meds.map((m,i) => ({ key:`med_${i}`, label:m, type:"medcheck" }))];
+  const allRows = [...ROWS, ...meds.map((m,i) => { const md = medOf(m); return { key:`med_${i}`, label: md.name, type:"medcheck", maxDoses: md.maxDoses }; })];
   const episodes = buildEpisodes(data, meds);
   const synthese = computeSynthese(episodes, meds);
   const cv = (day,row) => {
     const v = data[`d${day}`]?.[row.key]??"";
-    if (row.type==="medcheck") { const n = medDose(v); return n>=2 ? "✕" : n===1 ? "/" : ""; }
+    if (row.type==="medcheck") { const n = Math.min(medDose(v), row.maxDoses||1); return n>=2 ? "✕" : n===1 ? "/" : ""; }
     if (v===true||v===1) return "✓";
     return v||"";
   };
@@ -307,13 +325,13 @@ export default function App() {
     if (dir) { setDataDir(dir); showToast("Dossier mis à jour"); }
   };
 
-  const addMed    = () => { const s={...settings,meds:[...settings.meds,`Médicament ${settings.meds.length+1}`]}; setSettings(s); saveFile(settingsFile(),s); };
-  const renameMed = (i,val) => { const meds=[...settings.meds]; meds[i]=val; const s={...settings,meds}; setSettings(s); saveFile(settingsFile(),s); };
+  const addMed    = () => { const meds=[...settings.meds,{ name:`Médicament ${settings.meds.length+1}`, maxDoses:1, intervalH:null }]; const s={...settings,meds}; setSettings(s); saveFile(settingsFile(),s); };
+  const updateMed = (i,patch) => { const meds=settings.meds.map((m,idx)=> idx===i ? { ...medOf(m), ...patch } : m); const s={...settings,meds}; setSettings(s); saveFile(settingsFile(),s); };
   const deleteMed = (i) => { const meds=settings.meds.filter((_,idx)=>idx!==i); const s={...settings,meds}; setSettings(s); saveFile(settingsFile(),s); setConfirmDel(null); };
 
   const episodes = buildEpisodes(data, settings.meds);
   const synthese = computeSynthese(episodes, settings.meds);
-  const allRows  = [...ROWS, ...settings.meds.map((m,i) => ({ key:`med_${i}`, label:m, type:"medcheck", idx:i }))];
+  const allRows  = [...ROWS, ...settings.meds.map((m,i) => { const md = medOf(m); return { key:`med_${i}`, label: md.name, type:"medcheck", idx:i, maxDoses: md.maxDoses, intervalH: md.intervalH }; })];
 
   const [ollamaStatus, setOllamaStatus] = useState({ binExists: false, modelExists: false, running: false });
   const [ollamaSetupRunning, setOllamaSetupRunning] = useState(false);
@@ -490,7 +508,7 @@ export default function App() {
             </table>
           </div>
           <div style={{color:"var(--color-text-secondary)",fontSize:11,marginTop:8}}>
-            ✓ = présent · 1/2 = uni/bilatéral · médicaments : <strong style={{color:"var(--color-text-success)"}}>/</strong> = pris · <strong style={{color:"var(--color-text-danger)"}}>✕</strong> = 2ᵉ prise à 2h · clic pour changer
+            ✓ = présent · 1/2 = uni/bilatéral · médicaments : <strong style={{color:"var(--color-text-success)"}}>/</strong> = 1 prise · <strong style={{color:"var(--color-text-danger)"}}>✕</strong> = 2 prises · clic pour changer (délai entre prises réglable par médicament dans Paramètres)
           </div>
         </>
       )}
@@ -658,21 +676,35 @@ export default function App() {
       {/* SETTINGS */}
       {view==="settings"&&(
         <div style={{background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem"}}>
-          <p style={{fontWeight:500,marginBottom:12,fontSize:14}}>Médicaments aigus</p>
-          {settings.meds.map((m,i)=>(
-            <div key={i} style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
-              <input value={m} onChange={e=>renameMed(i,e.target.value)} style={{flex:1}}/>
-              <button onClick={()=>setConfirmDel(i)} style={{color:"var(--color-text-danger)",padding:"6px 10px"}}>
+          <p style={{fontWeight:500,marginBottom:4,fontSize:14}}>Médicaments aigus</p>
+          <p style={{color:"var(--color-text-secondary)",fontSize:11,marginBottom:12,lineHeight:1.6}}>
+            Pour chaque médicament : son nom, le nombre de prises possibles, et le délai avant une 2ᵉ prise (propre au médicament). Dans la grille : <strong style={{color:"var(--color-text-success)"}}>/</strong> = 1 prise · <strong style={{color:"var(--color-text-danger)"}}>✕</strong> = 2 prises. Ces réglages sont transmis à l'analyse IA.
+          </p>
+          {settings.meds.map((m,i)=>{ const md = medOf(m); return (
+            <div key={i} style={{display:"flex",gap:8,alignItems:"center",marginBottom:8,flexWrap:"wrap"}}>
+              <input value={md.name} onChange={e=>updateMed(i,{name:e.target.value})} placeholder="Nom du médicament" style={{flex:"1 1 150px"}}/>
+              <select value={md.maxDoses} onChange={e=>updateMed(i,{maxDoses:Number(e.target.value)})} title="Nombre de prises possibles par jour" style={{fontSize:12}}>
+                <option value={1}>1 prise max</option>
+                <option value={2}>2 prises max</option>
+              </select>
+              {md.maxDoses>=2 && (
+                <label style={{fontSize:12,color:"var(--color-text-secondary)",display:"flex",alignItems:"center",gap:4}}>
+                  2ᵉ après
+                  <input type="number" min="0" step="0.5" value={md.intervalH ?? ""} onChange={e=>updateMed(i,{intervalH: e.target.value===""?null:Number(e.target.value)})} placeholder="2" style={{width:54}}/>
+                  h
+                </label>
+              )}
+              <button onClick={()=>setConfirmDel(i)} title="Supprimer" style={{color:"var(--color-text-danger)",padding:"6px 10px"}}>
                 <i className="ti ti-trash" aria-hidden="true"></i>
               </button>
             </div>
-          ))}
+          );})}
           <button onClick={addMed} style={{marginTop:4,display:"flex",alignItems:"center",gap:6}}>
             <i className="ti ti-plus" aria-hidden="true"></i> Ajouter
           </button>
           {confirmDel!==null&&(
             <div style={{marginTop:16,padding:"12px",background:"var(--color-background-danger)",border:"0.5px solid var(--color-border-danger)",borderRadius:"var(--border-radius-md)"}}>
-              <p style={{color:"var(--color-text-danger)",marginBottom:10,fontSize:13}}>Supprimer « {settings.meds[confirmDel]} » ?</p>
+              <p style={{color:"var(--color-text-danger)",marginBottom:10,fontSize:13}}>Supprimer « {medOf(settings.meds[confirmDel]).name} » ?</p>
               <div style={{display:"flex",gap:8}}>
                 <button onClick={()=>deleteMed(confirmDel)} style={{color:"var(--color-text-danger)"}}>Confirmer</button>
                 <button onClick={()=>setConfirmDel(null)}>Annuler</button>
@@ -747,11 +779,15 @@ function CellInput({row,val,onChange}){
   if(row.type==="number")return(<input type="number" min={row.min} max={row.max} value={val} onChange={e=>onChange(e.target.value===""?"":Number(e.target.value))} style={{...s}} placeholder="–"/>);
   if(row.type==="side"){const cycle={"":"1","1":"2","2":""};return <button onClick={()=>onChange(cycle[val]??"")} style={{...s,fontWeight:500,color:val?"var(--color-text-primary)":"var(--color-text-tertiary)"}}>{val||"–"}</button>;}
   if(row.type==="medcheck"){
-    const n = medDose(val);
-    const next = n===0 ? 1 : n===1 ? 2 : "";        // vide -> 1 trait -> croix -> vide
-    const glyph = n===1 ? "/" : n===2 ? "✕" : "–";
-    const col = n===2 ? "var(--color-text-danger)" : n===1 ? "var(--color-text-success)" : "var(--color-text-tertiary)";
-    return(<button onClick={()=>onChange(next)} title="Vide → 1 trait (pris) → croix (2ᵉ prise à 2h)" style={{...s,color:col,fontWeight:700,fontSize:15}} aria-label="Prise de médicament">{glyph}</button>);
+    const max = row.maxDoses || 1;
+    const n = Math.min(medDose(val), max);
+    const next = n >= max ? "" : n + 1;               // cycle 0 -> 1 -> (2) -> vide selon le max
+    const glyph = n===0 ? "–" : n===1 ? "/" : "✕";    // 1 trait / croix (2 prises)
+    const col = n>=2 ? "var(--color-text-danger)" : n===1 ? "var(--color-text-success)" : "var(--color-text-tertiary)";
+    const title = max>=2
+      ? `Vide → / (1 prise) → ✕ (2 prises${row.intervalH?`, 2e à ~${row.intervalH}h`:""}) → vide`
+      : "Vide → / (pris) → vide";
+    return(<button onClick={()=>onChange(next)} title={title} style={{...s,color:col,fontWeight:700,fontSize:15}} aria-label="Prise de médicament">{glyph}</button>);
   }
   if(row.type==="bool")return(<button onClick={()=>onChange(val?"":true)} style={{...s,color:val?"var(--color-text-success)":"var(--color-text-tertiary)"}} aria-label={val?"Effacer":"Marquer"}>{val?<i className="ti ti-check" style={{fontSize:14}} aria-hidden="true"></i>:<span style={{fontSize:11}}>–</span>}</button>);
   return null;
