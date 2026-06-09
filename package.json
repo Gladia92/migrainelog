@@ -48,7 +48,9 @@
     "files": [
       "dist/**/*",
       "electron.js",
-      "preload.js"
+      "preload.js",
+      "gdrive.js",
+      "google-secret.txt"
     ]
   }
 }

@@ -65,6 +65,15 @@ jobs:
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
 
+      - name: Restore Google OAuth secret
+        if: env.GOOGLE_CLIENT_SECRET != ''
+        run: |
+          [IO.File]::WriteAllText("google-secret.txt", $env:GOOGLE_CLIENT_SECRET)
+          Write-Host "google-secret.txt restored"
+        shell: pwsh
+        env:
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+
       - name: Build
         run: npm run make
         env:
