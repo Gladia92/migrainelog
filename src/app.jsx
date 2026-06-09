@@ -23,7 +23,7 @@ const MONTHS_SHORT = ["Jan","Fév","Mar","Avr","Mai","Jui","Jul","Aoû","Sep","O
 const today = new Date();
 
 function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
-function fileKey(y, m)     { return `migraine_${y}_${String(m).padStart(2,"0")}.json`; }
+function fileKey(y, m)     { return `migraine_${y}_${String(m + 1).padStart(2,"0")}.json`; } // m est 0-based (JS) -> nom de fichier 1-based (humain)
 function settingsFile()    { return "migraine_settings.json"; }
 
 // Dose d'un médicament sur un jour : 0 = non pris, 1 = 1 prise (1 trait), 2 = 2 prises (croix).
@@ -74,7 +74,7 @@ async function getAllMonthsData(meds) {
       const raw = await window.electronAPI.readData(f);
       try {
         const parts = f.replace("migraine_","").replace(".json","").split("_");
-        const y = parseInt(parts[0]), mo = parseInt(parts[1]);
+        const y = parseInt(parts[0]), mo = parseInt(parts[1]) - 1; // nom 1-based -> index 0-based
         const data = JSON.parse(raw);
         if (Object.keys(data).length) result.push({ year: y, month: mo, data });
       } catch {}
@@ -85,7 +85,7 @@ async function getAllMonthsData(meds) {
       if (!k.startsWith("migraine_") || k === "migraine_settings.json") continue;
       try {
         const parts = k.replace("migraine_","").replace(".json","").split("_");
-        const y = parseInt(parts[0]), mo = parseInt(parts[1]);
+        const y = parseInt(parts[0]), mo = parseInt(parts[1]) - 1; // nom 1-based -> index 0-based
         const data = JSON.parse(localStorage.getItem(k));
         if (Object.keys(data).length) result.push({ year: y, month: mo, data });
       } catch {}
