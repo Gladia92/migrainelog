@@ -9,6 +9,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   exportJSON:    (content)           => ipcRenderer.invoke("export-json", content),
   importJSON:    ()                  => ipcRenderer.invoke("import-json"),
   // Ollama
+  // Sync Google Drive
+  gdriveSignIn:  ()                  => ipcRenderer.invoke("gdrive-signin"),
+  gdriveSignOut: ()                  => ipcRenderer.invoke("gdrive-signout"),
+  gdriveStatus:  ()                  => ipcRenderer.invoke("gdrive-status"),
+  gdrivePull:    ()                  => ipcRenderer.invoke("gdrive-pull"),
+  gdrivePush:    ()                  => ipcRenderer.invoke("gdrive-push"),
   ollamaStatus:  ()                  => ipcRenderer.invoke("ollama-status"),
   ollamaSetup:   ()                  => ipcRenderer.invoke("ollama-setup"),
   ollamaStart:   ()                  => ipcRenderer.invoke("ollama-start"),

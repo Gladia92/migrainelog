@@ -147,3 +147,7 @@ cert.pfx
 *.pfx
 cert-base64.txt
 *base64*
+
+# Secret OAuth Google — NE JAMAIS committer
+google-secret.txt
+google-tokens.json

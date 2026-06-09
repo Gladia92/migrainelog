@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
 const os = require("os");
+const gdrive = require("./gdrive");
 
 // ── Ollama
 const OLLAMA_DIR  = path.join(app.getPath("userData"), "ollama");
@@ -192,6 +193,32 @@ ipcMain.handle("import-json", async (e) => {
   });
   if (result.canceled) return null;
   return fs.readFileSync(result.filePaths[0], "utf8");
+});
+
+// ── Synchronisation Google Drive
+ipcMain.handle("gdrive-signin",  async () => gdrive.signIn());
+ipcMain.handle("gdrive-signout", async () => gdrive.signOut());
+ipcMain.handle("gdrive-status",  async () => gdrive.getStatus());
+
+// Télécharge le journal du Drive et l'écrit dans le dossier de données local
+ipcMain.handle("gdrive-pull", async () => {
+  const blob = await gdrive.pull();
+  if (!blob || !blob.files) return { ok: false, empty: true };
+  for (const [name, content] of Object.entries(blob.files)) {
+    if (!name.startsWith("migraine_") || !name.endsWith(".json")) continue;
+    fs.writeFileSync(path.join(DATA_DIR, name), typeof content === "string" ? content : JSON.stringify(content, null, 2), "utf8");
+  }
+  return { ok: true, count: Object.keys(blob.files).length, updatedAt: blob.updatedAt || null };
+});
+
+// Lit tout le dossier de données local et l'envoie dans le Drive
+ipcMain.handle("gdrive-push", async () => {
+  const files = {};
+  for (const f of fs.readdirSync(DATA_DIR)) {
+    if (f.startsWith("migraine_") && f.endsWith(".json")) files[f] = fs.readFileSync(path.join(DATA_DIR, f), "utf8");
+  }
+  await gdrive.push({ updatedAt: Date.now(), files });
+  return { ok: true, count: Object.keys(files).length };
 });
 
 // ── IPC : statut Ollama

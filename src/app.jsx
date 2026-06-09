@@ -268,6 +268,9 @@ export default function App() {
   const [annualYear, setAnnualYear] = useState(today.getFullYear());
   const [tooltip, setTooltip] = useState(null);
   const [dataDir, setDataDir] = useState("");
+  const [gsync,    setGsync]    = useState({ connected: false, email: "" });
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncMsg,  setSyncMsg]  = useState("");
   const [saveStatus, setSaveStatus] = useState("saved"); // saved | saving | error
   const saveTimer = useRef(null);
 
@@ -281,6 +284,7 @@ export default function App() {
       if (isElectron) {
         const dir = await window.electronAPI.getDataDir();
         setDataDir(dir);
+        window.electronAPI.gdriveStatus?.().then(setGsync).catch(()=>{});
       }
     })();
   }, []);
@@ -288,6 +292,15 @@ export default function App() {
   useEffect(() => {
     loadMonth(year, month).then(setData);
   }, [year, month]);
+
+  // Envoi auto vers le Drive après une modification (débounce), si connecté
+  const pushTimer = useRef(null);
+  useEffect(() => {
+    if (!isElectron || !gsync.connected) return;
+    if (pushTimer.current) clearTimeout(pushTimer.current);
+    pushTimer.current = setTimeout(() => { window.electronAPI.gdrivePush().catch(()=>{}); }, 2500);
+    return () => { if (pushTimer.current) clearTimeout(pushTimer.current); };
+  }, [data, settings, gsync.connected]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
 
@@ -361,6 +374,43 @@ export default function App() {
   const handleChooseDir = async () => {
     const dir = await window.electronAPI.chooseDataDir();
     if (dir) { setDataDir(dir); showToast("Dossier mis à jour"); }
+  };
+
+  // ── Synchronisation Google Drive
+  const reloadFromDisk = useCallback(async () => {
+    setSettings(await loadSettings());
+    setData(await loadMonth(year, month));
+  }, [year, month]);
+
+  const connectGoogle = async () => {
+    setSyncBusy(true); setSyncMsg("Connexion à Google…");
+    try {
+      setGsync(await window.electronAPI.gdriveSignIn());
+      setSyncMsg("Récupération du journal…");
+      const pulled = await window.electronAPI.gdrivePull();
+      if (pulled.empty) {
+        await window.electronAPI.gdrivePush();
+        setSyncMsg("Journal envoyé sur ton Drive.");
+      } else {
+        await reloadFromDisk();
+        setSyncMsg(`Journal récupéré depuis ton Drive (${pulled.count} fichier(s)).`);
+      }
+    } catch (e) { setSyncMsg("Échec : " + (e?.message || e)); }
+    setSyncBusy(false);
+  };
+
+  const disconnectGoogle = async () => {
+    setSyncBusy(true);
+    try { setGsync(await window.electronAPI.gdriveSignOut()); setSyncMsg(""); }
+    catch (e) { setSyncMsg("Échec : " + (e?.message || e)); }
+    setSyncBusy(false);
+  };
+
+  const syncNow = async () => {
+    setSyncBusy(true); setSyncMsg("Synchronisation…");
+    try { await window.electronAPI.gdrivePush(); setSyncMsg("Synchronisé à l'instant."); }
+    catch (e) { setSyncMsg("Échec : " + (e?.message || e)); }
+    setSyncBusy(false);
   };
 
   const updateProfile = (patch) => { const profile = { ...(settings.profile||{}), ...patch }; const s={...settings,profile}; setSettings(s); saveFile(settingsFile(),s); };
@@ -733,6 +783,33 @@ export default function App() {
       {/* SETTINGS */}
       {view==="settings"&&(
         <div style={{background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1rem 1.25rem"}}>
+          {isElectron && (
+            <>
+              <p style={{fontWeight:500,marginBottom:4,fontSize:14}}>Synchronisation</p>
+              <p style={{color:"var(--color-text-secondary)",fontSize:11,marginBottom:12,lineHeight:1.6}}>
+                Connecte ton compte Google pour retrouver ton journal sur tous tes appareils. Les données sont rangées dans <strong>ton</strong> Drive privé — rien n'est hébergé ailleurs.
+              </p>
+              {gsync.connected ? (
+                <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <span style={{fontSize:12,fontWeight:500,display:"flex",alignItems:"center",gap:6,padding:"4px 11px",borderRadius:999,background:"rgba(59,109,17,0.10)",color:"var(--color-text-success)"}}>
+                    <span style={{width:7,height:7,borderRadius:"50%",background:"var(--color-text-success)"}}></span>
+                    {gsync.email || "Connecté"}
+                  </span>
+                  <button onClick={syncNow} disabled={syncBusy} style={{fontSize:12,padding:"6px 12px",display:"flex",alignItems:"center",gap:6}}>
+                    <i className="ti ti-refresh" aria-hidden="true"></i> Synchroniser
+                  </button>
+                  <button onClick={disconnectGoogle} disabled={syncBusy} style={{fontSize:12,padding:"6px 12px",color:"var(--color-text-danger)"}}>Se déconnecter</button>
+                </div>
+              ) : (
+                <button onClick={connectGoogle} disabled={syncBusy} style={{fontSize:13,padding:"8px 14px",display:"flex",alignItems:"center",gap:8}}>
+                  {syncBusy?<><i className="ti ti-loader-2" aria-hidden="true"></i> Connexion…</>:<><i className="ti ti-brand-google" aria-hidden="true"></i> Se connecter avec Google</>}
+                </button>
+              )}
+              {syncMsg && <p style={{fontSize:11,color:"var(--color-text-secondary)",marginTop:8,display:"flex",alignItems:"center",gap:6}}>{syncBusy&&<i className="ti ti-loader-2" aria-hidden="true"></i>}{syncMsg}</p>}
+              <div style={{borderTop:"0.5px solid var(--color-border-tertiary)",margin:"16px 0"}}></div>
+            </>
+          )}
+
           <p style={{fontWeight:500,marginBottom:4,fontSize:14}}>Profil patient</p>
           <p style={{color:"var(--color-text-secondary)",fontSize:11,marginBottom:12,lineHeight:1.6}}>
             Ces informations affinent l'analyse IA et adaptent la grille (ex. la ligne « Menstruation » est masquée pour un homme).
