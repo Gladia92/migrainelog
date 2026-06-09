@@ -46,23 +46,27 @@ function downloadFile(url, dest, onProgress) {
   });
 }
 
-// Extrait un .zip via le tar intégré de Windows (bsdtar, présent depuis Win10 1803)
+// Extrait un .zip via le tar intégré de Windows (bsdtar, présent depuis Win10 1803).
+// On passe par le shell (cmd) avec chemins entre guillemets : évite "spawn UNKNOWN"
+// dû à la résolution du nom court.
 function extractZip(zipPath, destDir) {
   return new Promise((resolve, reject) => {
-    const p = spawn("tar", ["-xf", zipPath, "-C", destDir]);
+    const cmd = `tar -xf "${zipPath}" -C "${destDir}"`;
+    const p = spawn(cmd, { shell: true, windowsHide: true });
     let err = "";
     p.stderr.on("data", d => { err += d.toString(); });
-    p.on("close", code => code === 0 ? resolve() : reject(new Error("Extraction échouée: " + err)));
-    p.on("error", reject);
+    p.on("close", code => code === 0 ? resolve() : reject(new Error("Extraction (tar) échouée code " + code + ": " + err)));
+    p.on("error", e => reject(new Error("Extraction (tar): " + e.message)));
   });
 }
 
 function startOllama() {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     ollamaProcess = spawn(OLLAMA_BIN, ["serve"], {
       env: { ...process.env, OLLAMA_MODELS: OLLAMA_MODELS_DIR },
-      detached: false, stdio: "ignore"
+      detached: false, stdio: "ignore", windowsHide: true
     });
+    ollamaProcess.on("error", e => reject(new Error("Démarrage du moteur (ollama serve): " + e.message)));
     setTimeout(resolve, 2000);
   });
 }
@@ -183,14 +187,18 @@ ipcMain.handle("ollama-setup", async (e) => {
     ensureOllamaDir();
 
     if (!fs.existsSync(OLLAMA_BIN)) {
-      send("download-ollama", 0);
-      await downloadFile(OLLAMA_URL, OLLAMA_ZIP, p => send("download-ollama", p));
+      // Réutilise un zip déjà téléchargé (évite de re-télécharger 1,46 Go après un échec d'extraction)
+      const haveZip = fs.existsSync(OLLAMA_ZIP) && fs.statSync(OLLAMA_ZIP).size > 1000000;
+      if (!haveZip) {
+        send("download-ollama", 0);
+        await downloadFile(OLLAMA_URL, OLLAMA_ZIP, p => send("download-ollama", p));
+      }
       const zsize = fs.existsSync(OLLAMA_ZIP) ? fs.statSync(OLLAMA_ZIP).size : 0;
       if (zsize < 1000000) throw new Error(`Téléchargement du moteur incomplet (${zsize} octets) — URL ou réseau ?`);
       send("extract-ollama", 0);
       await extractZip(OLLAMA_ZIP, OLLAMA_DIR);
-      try { fs.unlinkSync(OLLAMA_ZIP); } catch {}
       if (!fs.existsSync(OLLAMA_BIN)) throw new Error("ollama.exe introuvable après extraction");
+      try { fs.unlinkSync(OLLAMA_ZIP); } catch {} // on ne supprime qu'après succès
     }
 
     if (!(await ollamaRunning())) {
@@ -203,7 +211,8 @@ ipcMain.handle("ollama-setup", async (e) => {
       send("download-model", 0);
       await new Promise((resolve, reject) => {
         const pull = spawn(OLLAMA_BIN, ["pull", MODEL_NAME], {
-          env: { ...process.env, OLLAMA_MODELS: OLLAMA_MODELS_DIR }
+          env: { ...process.env, OLLAMA_MODELS: OLLAMA_MODELS_DIR },
+          windowsHide: true
         });
         pull.stdout.on("data", d => {
           const m = d.toString().match(/(\d+)%/);
@@ -214,7 +223,7 @@ ipcMain.handle("ollama-setup", async (e) => {
           if (m) send("download-model", parseInt(m[1]));
         });
         pull.on("close", resolve);
-        pull.on("error", reject);
+        pull.on("error", e => reject(new Error("Téléchargement du modèle (ollama pull): " + e.message)));
       });
     }
 
