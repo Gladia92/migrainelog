@@ -83,3 +83,5 @@ jobs:
           tag_name: ${{ steps.ver.outputs.TAG }}
           name: MigraineLog ${{ steps.ver.outputs.VERSION }}
           files: out/*.exe
+          prerelease: false
+          make_latest: true
