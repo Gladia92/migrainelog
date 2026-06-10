@@ -319,7 +319,7 @@ ipcMain.handle("ollama-analyze", async (_e, prompt) => {
       model: MODEL_NAME,
       stream: false,
       messages: [
-        { role: "system", content: "Tu es un médecin spécialiste des céphalées (neurologue céphalologue). Tu analyses un journal de migraines pour le médecin traitant. Réponds UNIQUEMENT en français, de façon structurée (titres en majuscules + tirets), factuelle et prudente. Prends en compte le profil patient (sexe, âge, antécédents, traitement de fond) pour cibler l'analyse et les recommandations. Ne recopie pas la consigne, n'invente aucune donnée, et fonde-toi strictement sur les informations fournies." },
+        { role: "system", content: "Tu es un médecin spécialiste des céphalées (neurologue céphalologue). Tu analyses un journal de migraines pour le médecin traitant. Réponds UNIQUEMENT en français, de façon structurée (titres en majuscules + tirets), factuelle et prudente. Commence toujours par le titre exact « COMPTE RENDU POUR LE MÉDECIN TRAITANT » (respecte cette casse, ne le reformule pas). Prends en compte le profil patient (sexe, âge, antécédents, traitement de fond) pour cibler l'analyse et les recommandations. Ne recopie pas la consigne, n'invente aucune donnée, et fonde-toi strictement sur les informations fournies." },
         { role: "user", content: prompt }
       ],
       options: { temperature: 0.4, num_ctx: 8192 }

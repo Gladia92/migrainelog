@@ -218,7 +218,9 @@ ${detail}
 ${notesTxt || "Aucune note."}
 ---
 
-Produis une analyse structurée et factuelle (titres en MAJUSCULES) :
+Commence ta réponse par le titre exact, seul sur la première ligne, sans le modifier : COMPTE RENDU POUR LE MÉDECIN TRAITANT
+
+Puis produis une analyse structurée et factuelle (titres en MAJUSCULES) :
 
 1. RÉSUMÉ CLINIQUE — fréquence, durée, intensité moyennes ; classification probable ; aura.
 2. SYMPTÔMES ASSOCIÉS — signes végétatifs, pulsatile vs sourd, latéralisation, lien menstruel le cas échéant.
