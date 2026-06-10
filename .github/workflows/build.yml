@@ -120,7 +120,10 @@ jobs:
           java-version: 21
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm install
+          # Contourne le bug npm des dépendances optionnelles de Rollup sur Linux
+          node -e "const v=require('rollup/package.json').version;require('child_process').execSync('npm install --no-save @rollup/rollup-linux-x64-gnu@'+v,{stdio:'inherit'})"
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
 
