@@ -13,8 +13,8 @@ android {
         applicationId "com.migrainelog.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode project.hasProperty('vcode') ? vcode.toInteger() : 1
+        versionName project.hasProperty('vname') ? vname : "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

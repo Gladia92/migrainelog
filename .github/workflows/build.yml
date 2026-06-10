@@ -140,18 +140,23 @@ jobs:
           printf 'storeFile=../migrainelog-release.keystore\nstorePassword=%s\nkeyAlias=migrainelog\nkeyPassword=%s\n' "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEYSTORE_PASSWORD" > android/keystore.properties
           echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
 
-      - name: Build signed release APK
+      - name: Build signed release APK + AAB
         if: env.ANDROID_KEYSTORE_BASE64 != ''
         run: |
+          BASE=$(node -p "require('./package.json').version.split('+')[0]")
+          echo "versionName=$BASE  versionCode=${{ github.run_number }}"
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease bundleRelease --no-daemon -Pvcode=${{ github.run_number }} -Pvname=$BASE
           cd ..
           cp android/app/build/outputs/apk/release/app-release.apk "MigraineLog-${{ needs.build.outputs.tag }}.apk"
+          cp android/app/build/outputs/bundle/release/app-release.aab "MigraineLog-${{ needs.build.outputs.tag }}.aab"
 
-      - name: Attach APK to release
+      - name: Attach APK + AAB to release
         if: env.ANDROID_KEYSTORE_BASE64 != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.build.outputs.tag }}
-          files: MigraineLog-*.apk
+          files: |
+            MigraineLog-*.apk
+            MigraineLog-*.aab
