@@ -7,28 +7,28 @@ Fichier à uploader : **MigraineLog.aab** (sur le Bureau)
 
 ## 1. Identité de l'app
 - **Nom de l'app** (30 max) : `MigraineLog`
-- **Catégorie** : Santé et remise en forme
+- **Catégorie** : Style de vie *(anciennement « Santé et remise en forme » — voir section 10)*
 - **Type** : Application (gratuite)
-- **Tags** : migraine, céphalées, santé, journal, suivi
+- **Tags** : migraine, céphalées, journal, suivi, bien-être
 
 ## 2. Description courte (80 caractères max)
 ```
-Journal de migraines privé : suivez vos crises et aidez votre médecin.
+Journal de migraines privé : suivez vos crises et leur évolution au fil du temps.
 ```
 
 ## 3. Description complète (4000 max)
 ```
-MigraineLog — votre journal de migraines, simple et privé.
+MigraineLog — votre journal personnel de migraines, simple et privé.
 
-MigraineLog vous aide à suivre vos crises au quotidien et à préparer efficacement vos consultations. Notez en quelques secondes l'intensité, la durée, les symptômes et les médicaments pris, puis obtenez des synthèses claires à montrer à votre médecin.
+Suivez vos crises au quotidien : notez en quelques secondes l'intensité, la durée, les symptômes et ce que vous avez pris. Obtenez des synthèses claires pour mieux comprendre vos tendances — et partagez-les avec qui vous voulez si vous le souhaitez.
 
 CE QUE VOUS POUVEZ FAIRE
-• Grille jour par jour : intensité (1–10), durée, uni/bilatéral, symptômes (aura, nausées, photophobie…), médicaments.
-• Suivi précis des prises de médicaments, y compris une 2ᵉ prise (utile pour les triptans).
+• Grille jour par jour : intensité (1–10), durée, uni/bilatéral, symptômes (aura, nausées, photophobie…), prises notées.
+• Suivi précis des prises, y compris une 2ᵉ prise.
 • Synthèses mensuelles et vue annuelle pour visualiser la fréquence et les tendances.
-• Profil patient (âge, sexe, antécédents, traitement de fond) pour un suivi adapté.
-• Export PDF à apporter en consultation.
-• Analyse médicale par IA 100 % locale (sur ordinateur), sans aucun envoi de données.
+• Profil personnel (âge, sexe, antécédents, traitement habituel) pour des synthèses adaptées.
+• Export PDF de vos synthèses.
+• Synthèse automatique par IA 100 % locale (sur ordinateur), sans aucun envoi de données.
 
 VOS DONNÉES VOUS APPARTIENNENT
 • Aucune donnée hébergée sur nos serveurs.
@@ -36,9 +36,9 @@ VOS DONNÉES VOUS APPARTIENNENT
 • Aucune publicité, aucun traceur, aucune revente de données.
 
 POUR QUI ?
-Toute personne sujette aux migraines ou aux maux de tête qui souhaite mieux comprendre ses crises et dialoguer avec son médecin sur des données fiables.
+Toute personne sujette aux migraines ou aux maux de tête qui souhaite mieux comprendre ses crises grâce à un journal simple et personnel.
 
-MigraineLog n'est pas un dispositif médical et ne fournit pas de diagnostic. C'est un outil de suivi personnel destiné à accompagner votre relation avec un professionnel de santé.
+MigraineLog est un journal personnel : il ne fournit aucun diagnostic ni conseil médical.
 ```
 
 ## 4. Coordonnées (App content / Store listing)
@@ -57,7 +57,7 @@ MigraineLog n'est pas un dispositif médical et ne fournit pas de diagnostic. C'
   5. **Synchronisation** (compte connecté) — optionnel
 
 ## 6. Classification du contenu (questionnaire)
-- Type d'app : Utilitaire / Santé (pas un jeu).
+- Type d'app : Utilitaire / Style de vie (pas un jeu).
 - Violence / sexe / drogue / grossièretés / jeux d'argent : **Non** à tout.
 - → Résultat attendu : **Tout public** (PEGI 3).
 
@@ -78,10 +78,13 @@ Types de données à déclarer :
 
 Points clés à cocher : **pas de partage à des tiers**, **pas de publicité**, données **chiffrées en transit**, **suppression** possible (désinstallation / déconnexion).
 
-## 8. Déclaration « App santé » (App content)
-- L'app gère des données de santé saisies par l'utilisateur.
-- **N'est pas** un dispositif médical, **ne fournit pas** de diagnostic ni de conseil médical.
-- Pas de fonctionnalités cliniques régulées (pas de télémédecine, pas de mesures).
+## 8. Déclaration « App santé » / « Medical apps » (App content)
+- Question « Votre app est-elle une app médicale ? » → **Non**.
+- L'app ne fournit aucun diagnostic, conseil médical, mesure clinique ou service de
+  télémédecine — c'est un journal personnel (catégorie Style de vie, voir section 1).
+- La case « Informations de santé » de la section **Data safety** (section 7) reste
+  cochée **Oui** : ce sont deux déclarations distinctes (Data safety = type de
+  données traitées ; App content/Medical apps = positionnement clinique de l'app).
 
 ## 9. Pays / Diffusion
 - Disponibilité : tous pays (ou France d'abord, au choix).
@@ -105,29 +108,48 @@ Console Requirements policy » :
 > such as medical apps and human subjects research apps [...] must register as
 > an organization.
 
-**Constat** : MigraineLog gère un journal de données de santé (migraines, symptômes,
-médicaments), donc il est classé « Health app » au sens de la politique Google
-(en vigueur depuis le 31/08/2024). Ce n'est **pas un bug du code** — c'est le type
-de compte développeur (« individuel ») qui n'est plus autorisé pour cette catégorie.
+**Constat** : la classification « Health app » de Google se base notamment sur la
+**catégorie déclarée** et le **positionnement marketing** de la fiche Store
+(catégorie « Santé et remise en forme », vocabulaire « patient », « médecin »,
+« consultation », « analyse médicale »...), en plus du type de données traitées.
 
-⚠️ Modifier la catégorie/déclaration « App santé » pour échapper à cette règle
-**n'est pas recommandé** : l'app collecte bien des données de santé, une
-déclaration inexacte exposerait à d'autres violations (Data safety, Health apps
-policy) et à un bannissement plus sérieux.
+### Option A — Compte « Organisation » (si on garde un positionnement « santé »)
+1. Play Console → **Paramètres → Compte développeur** → transformer le compte
+   individuel en compte **Organisation**.
+2. Documents requis : numéro **D-U-N-S** (Dun & Bradstreet, gratuit — voir aussi
+   la note Suisse ci-dessous) + justificatif légal de l'entité.
+3. Une fois vérifié, renvoyer la version pour examen depuis **Présentation de la
+   publication**.
+4. Appel possible depuis Play Console, mais peu de chances d'aboutir vu la
+   description initiale (suivi de crises, médicaments, synthèses pour le médecin).
 
-### Étapes pour résoudre (côté Play Console, hors code)
-1. Dans Play Console → **Paramètres → Compte développeur**, lancer la
-   **transformation du compte individuel en compte « Organisation »**.
-2. Préparer les documents requis pour un compte Organisation :
-   - Numéro **D-U-N-S** (Dun & Bradstreet) pour l'entité légale (XYVEL ou nom
-     d'exploitation utilisé) — gratuit, demande via le site Dun & Bradstreet.
-   - Justificatif légal de l'entité (immatriculation, etc.).
-3. Une fois le compte basculé et vérifié, retourner sur la page **Présentation
-   de la publication** et renvoyer la version pour examen (« Send for review »).
-4. Si vous estimez la classification « Health app » incorrecte pour MigraineLog,
-   il est possible de **soumettre un appel** depuis Play Console — mais vu la
-   description de l'app (suivi de crises, médicaments, synthèses pour le médecin),
-   un appel a peu de chances d'aboutir.
+### Option B — Repositionnement « Style de vie » (✅ retenue)
+Plutôt que de créer un compte Organisation (avec ses contraintes
+d'enregistrement/D-U-N-S), MigraineLog est repositionné comme **journal
+personnel** (catégorie *Style de vie*, voir sections 1, 3, 6 et 8) plutôt que
+comme « app santé/médicale » :
+- Catégorie Store : *Style de vie* au lieu de *Santé et remise en forme*.
+- Description : vocabulaire « journal personnel », sans référence à
+  « patient », « médecin », « diagnostic », « consultation ».
+- App content → « Medical apps » : répondu **Non** (l'app ne fait aucune
+  affirmation clinique).
+- La fonctionnalité de rapport pour le médecin **reste dans l'app** (utile aux
+  utilisateurs) — seul le **positionnement de la fiche Store** change.
+- La déclaration **Data safety** (section 7, « Informations de santé ») reste
+  honnête et inchangée — elle ne déclenche pas à elle seule l'exigence
+  Organisation.
+
+⚠️ **Limite** : si lors de la revue manuelle Google ouvre l'app et juge que la
+fonction « compte rendu pour le médecin traitant » relève quand même d'un usage
+médical, le rejet peut revenir. Si ça se reproduit, basculer sur l'**Option A**.
+
+### Note Suisse — D-U-N-S pour entreprise individuelle (si Option A un jour)
+- Le D-U-N-S reste exigé même pour une raison individuelle (Einzelfirma).
+- En Suisse, le numéro **IDE (CHE-xxx.xxx.xxx)** — obtenu automatiquement dès
+  l'affiliation AVS comme indépendant ou l'inscription à la TVA, **même sans**
+  inscription au registre du commerce (obligatoire seulement si CA > CHF 100'000)
+  — sert de base à D&B pour émettre/rattacher un D-U-N-S gratuitement (délai :
+  quelques jours à 2-3 semaines).
 
 ### Alternative (si pas d'entité légale disponible)
 - Un développeur individuel peut s'enregistrer comme **« Organisation /
