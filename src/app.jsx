@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { App as CapacitorApp } from "@capacitor/app";
 import * as gdriveMobile from "./gdrive-mobile.js";
 
 // ── Electron bridge (falls back to localStorage in browser dev)
@@ -317,6 +318,33 @@ export default function App() {
   }, [data, settings, gsync.connected]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
+
+  // ── Bouton retour Android : ferme les modales, revient à l'accueil (grille),
+  //    puis double appui pour quitter l'application (comme les apps mobiles natives).
+  const backHandlerRef = useRef(() => {});
+  const lastBackRef = useRef(0);
+  backHandlerRef.current = () => {
+    if (noteModal)            { setNoteModal(null); return; }
+    if (confirmDel !== null)  { setConfirmDel(null); return; }
+    if (tooltip)              { setTooltip(null);   return; }
+    if (view !== "grid")      { setView("grid");    return; }
+    const now = Date.now();
+    if (now - lastBackRef.current < 2000) {
+      CapacitorApp.exitApp();
+    } else {
+      lastBackRef.current = now;
+      showToast("Appuyez de nouveau pour quitter");
+    }
+  };
+
+  useEffect(() => {
+    if (!isCapacitor) return;
+    let handle;
+    CapacitorApp.addListener("backButton", () => backHandlerRef.current())
+      .then((h) => { handle = h; })
+      .catch(() => {});
+    return () => { if (handle) handle.remove(); };
+  }, []);
 
   const persistData = useCallback((y, m, newData) => {
     setSaveStatus("saving");
