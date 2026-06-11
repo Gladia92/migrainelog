@@ -93,3 +93,44 @@ Points clés à cocher : **pas de partage à des tiers**, **pas de publicité**,
 ### Rappels techniques avant publication
 - Pour chaque mise à jour, incrémenter `versionCode` dans android/app/build.gradle (actuellement 1) et rebuild le .aab.
 - La sync Drive pour le grand public nécessitera la **validation OAuth Google** (écran de consentement) — séparée du Play Store, à lancer en parallèle.
+
+---
+
+## 10. Refus Play Store — compte développeur « Organisation » requis (2026-06-11)
+
+Google a **rejeté la publication** de MigraineLog avec le motif « Violation of Play
+Console Requirements policy » :
+
+> Some types of apps can only be distributed by organizations. [...] Health apps,
+> such as medical apps and human subjects research apps [...] must register as
+> an organization.
+
+**Constat** : MigraineLog gère un journal de données de santé (migraines, symptômes,
+médicaments), donc il est classé « Health app » au sens de la politique Google
+(en vigueur depuis le 31/08/2024). Ce n'est **pas un bug du code** — c'est le type
+de compte développeur (« individuel ») qui n'est plus autorisé pour cette catégorie.
+
+⚠️ Modifier la catégorie/déclaration « App santé » pour échapper à cette règle
+**n'est pas recommandé** : l'app collecte bien des données de santé, une
+déclaration inexacte exposerait à d'autres violations (Data safety, Health apps
+policy) et à un bannissement plus sérieux.
+
+### Étapes pour résoudre (côté Play Console, hors code)
+1. Dans Play Console → **Paramètres → Compte développeur**, lancer la
+   **transformation du compte individuel en compte « Organisation »**.
+2. Préparer les documents requis pour un compte Organisation :
+   - Numéro **D-U-N-S** (Dun & Bradstreet) pour l'entité légale (XYVEL ou nom
+     d'exploitation utilisé) — gratuit, demande via le site Dun & Bradstreet.
+   - Justificatif légal de l'entité (immatriculation, etc.).
+3. Une fois le compte basculé et vérifié, retourner sur la page **Présentation
+   de la publication** et renvoyer la version pour examen (« Send for review »).
+4. Si vous estimez la classification « Health app » incorrecte pour MigraineLog,
+   il est possible de **soumettre un appel** depuis Play Console — mais vu la
+   description de l'app (suivi de crises, médicaments, synthèses pour le médecin),
+   un appel a peu de chances d'aboutir.
+
+### Alternative (si pas d'entité légale disponible)
+- Un développeur individuel peut s'enregistrer comme **« Organisation /
+  Sole proprietorship » (entreprise individuelle / auto-entrepreneur)** dans
+  certains pays sans D-U-N-S préexistant — Play Console guide vers la création
+  d'un numéro D-U-N-S pendant le processus si besoin.
